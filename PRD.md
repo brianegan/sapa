@@ -85,7 +85,7 @@ me through my existing notification hook, which opens the right window on click.
 33. As a developer, I want the same gate skill to adapt per project via config, so that repos with different toolchains all run the right commands.
 34. As a developer, I want the agreed plan written to the GitHub issue rather than left in my local session, so that the plan is durable and visible even if I never finish.
 35. As a developer, I want the plan on the issue rather than in the code repo, so that it does not become a stale file I have to maintain in source.
-36. As a developer, I want the plan to live in a machine-managed section of the issue that locks when I edit it, so that the tool keeps it current without clobbering my words.
+36. As a developer, I want the plan to live in a machine-managed comment on the issue that locks when I edit it, so that the tool keeps it current without clobbering my words or touching the issue body.
 37. As a developer, I want the issue's plan reconciled at gate pass, so that when what I built diverged from the plan, the issue reflects what actually shipped.
 38. As a developer, I want the issue's plan updated when review feedback changes the approach, so that the issue never misrepresents the decision we landed on.
 39. As a developer, I want the PR description to link the issue with `Closes #N` rather than repeat the plan, so that intent and execution summary each live in one place.
@@ -158,9 +158,10 @@ me through my existing notification hook, which opens the right window on click.
   deferred.
 - **Plan capture on the issue.** The agreed plan is written to the GitHub issue,
   not kept in the local session and not committed to the code repo. It lives in a
-  delimited, machine-managed "Plan" section of the issue body under the same
-  ownership rule as the PR description: the tool maintains it until the developer
-  edits that section, then it locks. The plan is reconciled at gate pass (if the
+  dedicated, machine-managed "Plan" comment on the issue — never in the issue
+  body, which stays byte-for-byte as the author wrote it — under the same
+  ownership rule as the PR description: the tool maintains that comment until the
+  developer edits it, then it locks. The plan is reconciled at gate pass (if the
   build diverged) and when review feedback materially changes the approach, so
   the issue stays truthful across the life of the work. The PR description links
   the issue with `Closes #N` and does not repeat the plan.

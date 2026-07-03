@@ -31,8 +31,10 @@ is not burning tokens while it waits. On each change:
     reply that it is done.
   - Subjective or a judgement call: do not guess. Escalate to the user through
     the notification hook so clicking it opens this window, and wait.
-  - If a comment changes the approach, refresh the plan on the issue with
-    `sapa-section plan` (add a comment instead if that section is locked).
+  - If a comment changes the approach, refresh the plan comment on the issue
+    with the same flow `/sapa-plan` step 4 uses: find the `sapa:plan` comment,
+    run its body through `sapa-section plan`, and patch it in place. If that
+    comment is locked or edited, leave it. Never touch the issue body.
 - **`main` has moved** and branch protection needs the branch up to date: if the
   rebase is trivial (no conflicts), rebase onto `origin/main`, re-run the gate
   (the `/sapa-ship --gate-only` steps), and push. If it is not trivial, escalate.
