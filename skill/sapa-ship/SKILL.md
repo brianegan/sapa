@@ -63,12 +63,10 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
 
 ## Step 4 — Reconcile the plan
 
-If what shipped diverged from the plan on the issue, refresh the plan comment
-with the same flow `/sapa-plan` step 4 uses: find the comment whose body carries
-`<!-- sapa:plan`, run its body through `sapa-section plan`, and if the stderr
-status is `updated`, patch it in place with
-`npx -y gh-axi api PATCH /repos/{owner}/{repo}/issues/comments/<id> --field body="$(cat /tmp/sapa-comment.md)"`.
-If `locked` or `locked-edited`, the user owns that comment — leave it and note
+If what shipped diverged from the plan on the issue, refresh the plan comment by
+running `/sapa-plan` step 4's flow verbatim — find (or create) the `sapa:plan`
+comment, build it through `sapa-section plan`, and post or patch it in place. If
+that comment is `locked`/`locked-edited`, the user owns it — leave it and note
 the divergence in the ship summary. Never touch the issue body.
 
 ## Step 5 — Hand off to watch
