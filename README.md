@@ -13,27 +13,53 @@ See [PRD.md](PRD.md) for the full design and rationale.
 
 ## What's here
 
-- `skill/SKILL.md` — the `/sapa` skill: locate config, capture the plan on the
-  issue, run the gate in the working tree, push to `origin`, open a draft PR with
-  a managed description.
-- `bin/sapa-config` — finds the project's `.sapa.yaml` by walking up from the
-  current directory, the same way `worktree` finds `.bare`.
-- `bin/sapa-section` — maintains a machine-managed section inside a PR
-  description or issue body and never clobbers text a human has edited or locked.
-- `.sapa.yaml` — Sapa's own gate config (it gates itself).
-- `tests/` — tests for the two helpers.
+Three `/sapa-*` skills, one per phase, so each shows up on its own in the `/`
+menu and can't wander into another phase:
+
+- `skill/sapa-plan` — read the issue, agree a plan, record it on the issue.
+- `skill/sapa-ship` — gate in the working tree, push to `origin`, open a draft
+  PR, then hand off to watch.
+- `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
+  tear the stream down when it merges.
+
+Helper scripts, backing the skills so there's no duplicated logic:
+
+- `bin/sapa-start` — turn an issue number into a worktree ready to plan (derives
+  the branch name from the issue title and calls `worktree`).
+- `bin/sapa-config` — find the project's `.sapa.yaml` by walking up, the way
+  `worktree` finds `.bare`.
+- `bin/sapa-section` — maintain a machine-managed section of a PR body or issue
+  without clobbering text a human has edited or locked.
+- `bin/sapa-teardown` — remove a merged stream's worktree and local branch,
+  refusing if there are uncommitted changes.
+
+Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 
 ## Install
 
-Put the helpers on your `PATH` and the skill where Claude Code can find it:
+Put the helpers on your `PATH` and the skills where Claude Code can find them:
 
 ```sh
-ln -sf "$PWD/bin/sapa-config"  ~/bin/sapa-config
-ln -sf "$PWD/bin/sapa-section" ~/bin/sapa-section
-ln -sfn "$PWD/skill"           ~/.claude/skills/sapa
+for h in sapa-start sapa-config sapa-section sapa-teardown; do
+  ln -sf "$PWD/bin/$h" ~/bin/$h
+done
+for s in sapa-plan sapa-ship sapa-watch; do
+  ln -sfn "$PWD/skill/$s" ~/.claude/skills/$s
+done
 ```
 
 GitHub access uses `gh-axi`, invoked on demand as `npx -y gh-axi`.
+
+## Flow
+
+```sh
+sapa-start 42     # issue 42 -> worktree, opens your editor
+# open Claude in the new window, then:
+/sapa-plan        # read issue 42, agree a plan, write it to the issue
+# ...implement...
+/sapa-ship        # gate, push, open a draft PR, start watching
+# on merge, watch removes the worktree for you
+```
 
 ## Config
 

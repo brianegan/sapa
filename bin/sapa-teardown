@@ -1,0 +1,74 @@
+#!/bin/bash
+# sapa-teardown — remove a finished stream's worktree and local branch.
+#
+# The terminal step of watch: once a PR is merged, the stream is done. This
+# removes the worktree and deletes its local branch so there is no manual
+# cleanup.
+#
+# Two guards:
+#   * It refuses to tear down a worktree with uncommitted changes (exit 3).
+#   * It runs `git` from the project root, never from inside the worktree it is
+#     removing, so it works even when called from within that worktree. The
+#     caller's shell cwd will be invalid afterwards — that is expected, the
+#     window can be closed.
+#
+# Usage:
+#   sapa-teardown [worktree-path]   # defaults to the current directory
+#   sapa-teardown --force [path]    # remove even with uncommitted changes
+
+set -euo pipefail
+
+force=false
+target=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force) force=true ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "sapa-teardown: unknown flag: $1" >&2; exit 2 ;;
+    *) target="$1" ;;
+  esac
+  shift
+done
+
+target="${target:-${PWD:-$(pwd)}}"
+target="$(cd "$target" && pwd)"   # normalise to an absolute path
+
+# Find the project root: walk up from the target until we see a .bare directory.
+project_root=""
+dir="$target"
+while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+  if [ -d "$dir/.bare" ]; then project_root="$dir"; break; fi
+  dir=$(dirname "$dir")
+done
+if [ -z "$project_root" ]; then
+  echo "sapa-teardown: no .bare found above $target" >&2
+  exit 1
+fi
+
+if [ "$target" = "$project_root" ]; then
+  echo "sapa-teardown: refusing to remove the project root itself" >&2
+  exit 1
+fi
+
+branch="$(git -C "$target" rev-parse --abbrev-ref HEAD)"
+
+# Guard: never destroy uncommitted work.
+if ! $force && [ -n "$(git -C "$target" status --porcelain)" ]; then
+  echo "sapa-teardown: $target has uncommitted changes; not removing." >&2
+  echo "Commit, stash, or rerun with --force." >&2
+  exit 3
+fi
+
+# Run git from the project root so the removal works even if the caller is
+# sitting inside the worktree being removed.
+if $force; then
+  git -C "$project_root" worktree remove --force "$target"
+else
+  git -C "$project_root" worktree remove "$target"
+fi
+
+if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
+  git -C "$project_root" branch -D "$branch" >/dev/null 2>&1 || true
+fi
+
+echo "sapa-teardown: removed worktree $target and branch $branch"

@@ -35,7 +35,8 @@ jobs inside it stay distinct phases:
 - **Watch** is the same session monitoring its own PR through a cheap background
   poller. It fixes CI failures, addresses mechanical review comments, escalates
   subjective ones to me, and auto-rebases a trivially-moved `main` before
-  re-running the gate.
+  re-running the gate. When the PR merges, it tears the stream down: remove the
+  worktree and delete the local branch, so I do not clean up by hand.
 
 On a green gate the flow hands off to watch automatically, so I never manually
 invoke watch after a gate. Watch starts in a draft posture and continues through
@@ -91,6 +92,8 @@ me through my existing notification hook, which opens the right window on click.
 40. As a developer, I want a green gate to hand off to watch automatically, so that I do not have to manually invoke watch after every gate.
 41. As a developer, I want to run the gate on its own without pushing, so that I can check work in progress without opening a PR.
 42. As a developer, I want to attach watch to an existing PR without re-gating, so that I can resume monitoring from a fresh session.
+43. As a developer, I want the worktree removed and the local branch deleted when the PR merges, so that I do not manually tear down finished streams.
+44. As a developer, I want teardown skipped and flagged when the worktree has uncommitted changes, so that auto-cleanup never destroys unsaved work.
 
 ## Implementation Decisions
 
@@ -136,6 +139,14 @@ me through my existing notification hook, which opens the right window on click.
 - **Trivial-merge policy.** A moved `main` is auto-rebased only when the merge is
   trivial, and the gate is always re-run afterward before the PR is considered
   green. The precise definition of "trivial" is an open decision.
+- **Merge teardown.** When the watcher sees the PR merged, that is the terminal
+  state of the stream. It removes the worktree and deletes the local branch so
+  there is no manual cleanup. Two guards: it only tears down a clean worktree,
+  and if there are uncommitted changes it skips teardown and flags them instead.
+  Because the watch session runs inside the very worktree it is removing, the
+  teardown runs from the project root (not from inside the worktree) as the
+  watcher's final action, after which the window is detached and can be closed.
+  Deleting the remote branch is left to GitHub's auto-delete-on-merge setting.
 - **Escalation transport.** Human-in-the-loop escalations use the existing
   notification hook (`claude-notify.sh`), which opens the originating window on
   click.
@@ -170,9 +181,12 @@ me through my existing notification hook, which opens the right window on click.
 - **Secondary seam.** An isolated test of the PR-description ownership lock:
   given a description marked human-owned, a subsequent run must not modify it.
   This rule is the most likely to regress silently, so it earns its own test.
-- **Modules tested.** The `git`/`gh` helper scripts (push, open draft PR,
-  set/update description, detect CI status, detect new comments, detect and
-  rebase a moved `main`) and the description-ownership logic.
+- **Modules tested.** The deterministic helper scripts: `sapa-config`
+  (walk-up discovery), `sapa-section` (the ownership-lock logic for both PR body
+  and issue plan), `sapa-start` (issue-to-branch-name derivation), and
+  `sapa-teardown` (clean-guarded worktree removal). The `gh-axi`-driven and
+  agent-driven parts (opening the PR, fixing CI, classifying comments) are
+  verified by observation, not unit tests.
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
   end-to-end fixtures drive the pipeline against fixture repos with recorded
   agent interactions. Imitate that fixture-driven, command-surface approach.

@@ -1,0 +1,77 @@
+#!/bin/bash
+# sapa-start — turn a GitHub issue into a worktree, ready to plan.
+#
+# Replaces the manual dance of creating a branch on GitHub, copying the name,
+# and running `worktree`. Given an issue number, it derives a branch name from
+# the issue title and hands off to your existing `worktree` script (which creates
+# the worktree off origin/main and opens your editor).
+#
+# Usage:
+#   sapa-start <issue-number> [start-point]
+#   sapa-start <issue-number> --title "Some title"   # skip the gh-axi lookup
+#   sapa-start <issue-number> --print                # print the branch, don't run worktree
+#
+# GitHub access uses `gh-axi` (npx -y gh-axi). `origin` is the only remote.
+
+set -euo pipefail
+
+issue=""
+title=""
+start=""
+print_only=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title) shift; title="${1:-}" ;;
+    --print) print_only=true ;;
+    --start) shift; start="${1:-}" ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "sapa-start: unknown flag: $1" >&2; exit 2 ;;
+    *)
+      if [ -z "$issue" ]; then issue="$1"; else start="$1"; fi
+      ;;
+  esac
+  shift
+done
+
+# Normalise: strip a leading '#'.
+issue="${issue#\#}"
+if ! [[ "$issue" =~ ^[0-9]+$ ]]; then
+  echo "sapa-start: expected an issue number, got: '${issue:-}'" >&2
+  exit 2
+fi
+
+slugify() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
+    | cut -c1-50 \
+    | sed -E 's/-+$//'
+}
+
+# Fetch the title unless it was provided, so tests and offline use can skip the
+# network. Any failure just falls back to a bare-number branch.
+if [ -z "$title" ]; then
+  title="$(npx -y gh-axi issue view "$issue" 2>/dev/null \
+            | sed -nE 's/^[[:space:]]*title:[[:space:]]*(.+)$/\1/p' \
+            | head -1 || true)"
+fi
+
+slug="$(slugify "${title:-}")"
+if [ -n "$slug" ]; then
+  branch="${issue}-${slug}"
+else
+  branch="$issue"
+fi
+
+if $print_only; then
+  echo "$branch"
+  exit 0
+fi
+
+# Hand off to the existing worktree tool, which creates the tree and opens code.
+if [ -n "$start" ]; then
+  exec worktree "$branch" "$start"
+else
+  exec worktree "$branch"
+fi
