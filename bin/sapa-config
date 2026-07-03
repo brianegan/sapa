@@ -12,7 +12,8 @@
 
 set -euo pipefail
 
-name=".sapa.yaml"
+# Ordered by preference: a dotted config wins over a plain one in the same dir.
+names=(".sapa.yaml" "sapa.yaml")
 print_contents=false
 start="${PWD:-$(pwd)}"
 
@@ -31,22 +32,26 @@ done
 
 dir="$start"
 while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-  if [ -f "$dir/$name" ]; then
-    if $print_contents; then
-      cat "$dir/$name"
-    else
-      echo "$dir/$name"
+  for name in "${names[@]}"; do
+    if [ -f "$dir/$name" ]; then
+      if $print_contents; then
+        cat "$dir/$name"
+      else
+        echo "$dir/$name"
+      fi
+      exit 0
     fi
-    exit 0
-  fi
+  done
   dir=$(dirname "$dir")
 done
 
 # Check the filesystem root too.
-if [ -f "/$name" ]; then
-  if $print_contents; then cat "/$name"; else echo "/$name"; fi
-  exit 0
-fi
+for name in "${names[@]}"; do
+  if [ -f "/$name" ]; then
+    if $print_contents; then cat "/$name"; else echo "/$name"; fi
+    exit 0
+  fi
+done
 
-echo "sapa-config: no $name found in any parent of $start" >&2
+echo "sapa-config: no .sapa.yaml found in any parent of $start" >&2
 exit 1

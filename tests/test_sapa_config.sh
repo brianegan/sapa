@@ -39,6 +39,26 @@ check "finds config in current dir" "$root/proj/.sapa.yaml" "$found"
 contents="$("$CONFIG" -p --start "$root/proj/feature")"
 check "prints contents with -p" "base: main" "$contents"
 
+# Finds a non-dotfile sapa.yaml when it is the only config in an ancestor dir.
+mkdir -p "$root/plain/feature/deep"
+printf 'base: main\n' > "$root/plain/sapa.yaml"
+found="$("$CONFIG" --start "$root/plain/feature/deep")"
+check "finds sapa.yaml (no dot)" "$root/plain/sapa.yaml" "$found"
+
+# Prefers .sapa.yaml over sapa.yaml in the same dir.
+mkdir -p "$root/both/feature"
+printf 'base: dotted\n' > "$root/both/.sapa.yaml"
+printf 'base: plain\n' > "$root/both/sapa.yaml"
+found="$("$CONFIG" --start "$root/both/feature")"
+check "prefers .sapa.yaml in same dir" "$root/both/.sapa.yaml" "$found"
+
+# A closer sapa.yaml beats a farther .sapa.yaml (proximity over dot).
+mkdir -p "$root/near/child/deep"
+printf 'base: far\n' > "$root/near/.sapa.yaml"
+printf 'base: near\n' > "$root/near/child/sapa.yaml"
+found="$("$CONFIG" --start "$root/near/child/deep")"
+check "closer sapa.yaml beats farther .sapa.yaml" "$root/near/child/sapa.yaml" "$found"
+
 # Exits non-zero when no config exists anywhere up the tree.
 mkdir -p "$root/orphan"
 if "$CONFIG" --start "$root/orphan" >/dev/null 2>&1; then
