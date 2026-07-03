@@ -1,0 +1,52 @@
+#!/bin/bash
+# sapa-config — locate the Sapa config for the current stream.
+#
+# Walks up from the current directory until it finds a `.sapa.yaml`, the same
+# way `worktree` walks up to find `.bare`. Prints the path by default, or the
+# contents with -p/--print. Exits non-zero if no config is found.
+#
+# Usage:
+#   sapa-config           # print the path to the discovered .sapa.yaml
+#   sapa-config -p        # print its contents
+#   sapa-config --start DIR   # start the search from DIR instead of $PWD
+
+set -euo pipefail
+
+name=".sapa.yaml"
+print_contents=false
+start="${PWD:-$(pwd)}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--print) print_contents=true ;;
+    --start) shift; start="$1" ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "sapa-config: unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+dir="$start"
+while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+  if [ -f "$dir/$name" ]; then
+    if $print_contents; then
+      cat "$dir/$name"
+    else
+      echo "$dir/$name"
+    fi
+    exit 0
+  fi
+  dir=$(dirname "$dir")
+done
+
+# Check the filesystem root too.
+if [ -f "/$name" ]; then
+  if $print_contents; then cat "/$name"; else echo "/$name"; fi
+  exit 0
+fi
+
+echo "sapa-config: no $name found in any parent of $start" >&2
+exit 1

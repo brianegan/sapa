@@ -1,0 +1,203 @@
+# PRD: Sapa
+
+Sapa (Filipino for "stream") gates, ships, and watches a piece of work.
+Generated via `/to-prd` from the design conversation.
+
+## Problem Statement
+
+I get into a piece of work cleanly with my own tooling (`barry` to clone or init
+a bare repo, `worktree` to spin up a worktree per stream), but nothing gets me
+out of one. After the code is written, everything is manual: I run quality
+checks by hand, hand-fix PR descriptions, feed CI failures back to the agent one
+at a time, and integrate a moved `main` myself. I do this across three to five
+streams at once, so the manual coordination compounds.
+
+I tried `no-mistakes`, which introduces the workflow I want (a quality gate
+before every PR, plus post-PR monitoring), but its architecture fights mine. It
+puts a git proxy in front of `origin`, so I juggle a second remote and lose time
+thinking I am synced when I am not. It gates in a disposable worktree separate
+from mine, so state is opaque. It handles one stream at a time. It rewrites my
+hand-edited PR descriptions on every push. And it runs the gate as a background
+process, which blocks me in the wrong place and gives me no clean
+cancel-edit-rerun loop.
+
+## Solution
+
+A Claude Code skill, plus a few small `git`/`gh-axi` helper scripts, that runs
+inside the per-stream Claude session that already did the work. All GitHub
+operations go through `gh-axi`, an agent-oriented replacement for `gh`, invoked
+on demand as `npx -y gh-axi`. It runs as one fused flow by default, and the two
+jobs inside it stay distinct phases:
+
+- **Gate** is foreground and blocking. I invoke it when a stream is ready. It
+  runs in my working tree, I can cancel it to make a change and rerun, and on
+  green it pushes to `origin` and opens a draft PR with a written description.
+- **Watch** is the same session monitoring its own PR through a cheap background
+  poller. It fixes CI failures, addresses mechanical review comments, escalates
+  subjective ones to me, and auto-rebases a trivially-moved `main` before
+  re-running the gate.
+
+On a green gate the flow hands off to watch automatically, so I never manually
+invoke watch after a gate. Watch starts in a draft posture and continues through
+promotion to ready. The two are still callable on their own for the edge cases:
+gate-only when I want checks without pushing, and watch-only when a PR already
+exists and I just want to attach to it without re-gating.
+
+There is no second remote, no separate daemon, and no supervisor. Concurrency
+comes from running one window per stream, which I already do. Escalations reach
+me through my existing notification hook, which opens the right window on click.
+
+## User Stories
+
+1. As a developer, I want to run a single gate command when a stream is ready, so that every PR goes through the same quality bar without me remembering the steps.
+2. As a developer, I want the gate to run in my own working tree, so that I never have to keep a second worktree in sync.
+3. As a developer, I want the gate to push only to `origin`, so that I never manage a second remote or wonder which remote is authoritative.
+4. As a developer, I want the gate to block my session while it runs, so that I have a clear, single place where the work is being checked.
+5. As a developer, I want to cancel a running gate, make a change, and rerun it, so that I keep full control when I spot something mid-check.
+6. As a developer, I want the gate to run the project's configured review, test, docs, lint, and format steps, so that checks match what CI and my team expect.
+7. As a developer, I want the gate to open the PR as a draft, so that I can review and shape it before colleagues are pulled in.
+8. As a developer, I want the tool to write a useful PR description, so that I do not hand-write one every time.
+9. As a developer, I want the tool to stop editing the PR description the moment I edit it or tell it to leave it alone, so that my prose is never clobbered on the next push.
+10. As a developer, I want the tool to upgrade the PR description only on material change until I claim ownership, so that it stays current without fighting me.
+11. As a developer, I want the same session to watch its own PR after it is pushed, so that the watcher already has the full context of the work.
+12. As a developer, I want the watcher to run as a cheap background poller, so that it is not burning tokens while it waits for something to happen.
+13. As a developer, I want to be woken only when something actually happens on the PR, so that I am not distracted by idle polling.
+14. As a developer, I want CI failures fixed automatically and pushed, so that I do not have to come back and re-describe the failure to the agent.
+15. As a developer, I want mechanical review comments addressed automatically, so that small fixes do not require my attention.
+16. As a developer, I want subjective review comments escalated to me rather than guessed at, so that judgment calls stay mine.
+17. As a developer, I want a trivially-moved `main` rebased automatically, so that branch-protection "must be up to date" rules do not block me by hand.
+18. As a developer, I want the gate re-run after an automatic rebase, so that a clean merge that breaks the build is caught before it is called green.
+19. As a developer, I want to promote a draft PR to ready when I decide it is ready, so that I control when colleagues are invited to review.
+20. As a developer, I want my own review comments and my colleagues' comments to flow through the same pipe, so that GitHub is the single review surface regardless of who is commenting.
+21. As a developer, I want to run three to five streams at once, each in its own window, so that I can context-switch without being blocked.
+22. As a developer, I want each stream to watch its own PR independently, so that no single supervisor process can become a bottleneck or a single point of failure.
+23. As a developer, I want to close a window and know that stream's watch is gone, so that the OS owns process lifecycle and there is no hidden state.
+24. As a developer, I want escalations delivered through my existing notification hook, so that clicking a notification drops me into the exact window that needs me.
+25. As a developer, I want to keep my machine awake myself with caffeinate, so that the tool stays simple and local rather than hosted.
+26. As a developer, I want the gate to run with Claude only in v1, so that I am not blocked by an external reviewer that still needs command permissions.
+27. As a developer, I want a cross-model reviewer (Codex reviews, Claude implements) to be designable later, so that I can add independent review without re-architecting.
+28. As a developer, I want no cross-stream dashboard in v1, so that the tool ships smaller and I rely on my windows and switcher.
+29. As a developer, I want all GitHub operations to go through `gh-axi` rather than `gh`, so that the tool uses my chosen agent-oriented GitHub interface.
+30. As a developer, I want the tool to find its config by walking up from the current directory, so that it works from any worktree without per-invocation setup.
+31. As a developer, I want a gate step to be able to run a skill rather than a shell command, so that Flutter projects can use the wingspan review skill for the review step.
+32. As a developer, I want check commands to run through a version manager like `fvm`, so that analyze, test, and lint use the project's pinned toolchain instead of a global `flutter`/`dart` on PATH.
+33. As a developer, I want the same gate skill to adapt per project via config, so that repos with different toolchains all run the right commands.
+34. As a developer, I want the agreed plan written to the GitHub issue rather than left in my local session, so that the plan is durable and visible even if I never finish.
+35. As a developer, I want the plan on the issue rather than in the code repo, so that it does not become a stale file I have to maintain in source.
+36. As a developer, I want the plan to live in a machine-managed section of the issue that locks when I edit it, so that the tool keeps it current without clobbering my words.
+37. As a developer, I want the issue's plan reconciled at gate pass, so that when what I built diverged from the plan, the issue reflects what actually shipped.
+38. As a developer, I want the issue's plan updated when review feedback changes the approach, so that the issue never misrepresents the decision we landed on.
+39. As a developer, I want the PR description to link the issue with `Closes #N` rather than repeat the plan, so that intent and execution summary each live in one place.
+40. As a developer, I want a green gate to hand off to watch automatically, so that I do not have to manually invoke watch after every gate.
+41. As a developer, I want to run the gate on its own without pushing, so that I can check work in progress without opening a PR.
+42. As a developer, I want to attach watch to an existing PR without re-gating, so that I can resume monitoring from a fresh session.
+
+## Implementation Decisions
+
+- **Form factor.** A Claude Code skill plus small `git`/`gh-axi` helper scripts.
+  Not a binary, not a long-lived daemon, not a proxy remote.
+- **GitHub interface.** All GitHub operations go through `gh-axi`, an
+  agent-oriented replacement for `gh`, rather than calling `gh` directly. It is
+  invoked on demand as `npx -y gh-axi`, so there is no global install to manage.
+- **Config discovery.** The tool finds its config by walking up from the current
+  directory until it finds a config file, the same pattern `worktree` uses to
+  locate `.bare`.
+- **Config expressiveness.** A gate step can be either a shell command or a
+  skill invocation (for example, the wingspan review skill as the review step),
+  and commands can carry a version-manager prefix (for example `fvm dart
+  analyze`, `fvm flutter test`) so they use the project's pinned toolchain rather
+  than a global binary on PATH. This extends the `no-mistakes` repo-config idea.
+- **One fused flow, two phases, separable commands.** By default a single
+  invocation runs the gate, and on green it pushes, opens the draft PR, and hands
+  off to watch with no second command. The gate phase is foreground, blocking,
+  and cancelable. The watch phase is a background poller owned by the same
+  session. They are distinct because they have different context and lifetime
+  needs, but the developer experiences one flow. Gate and watch remain callable
+  on their own for gate-only (checks without pushing) and watch-only (attach to
+  an existing PR without re-gating).
+- **Single remote.** `origin` is the only remote the tool ever touches. No proxy
+  or secondary push target is introduced.
+- **In-tree gate.** The gate operates on the developer's active working tree, not
+  a disposable copy. Cancel is interrupting the session; rerun is invoking the
+  gate again.
+- **Configured checks.** The gate runs the project's configured review, test,
+  docs, lint, and format steps from the discovered config as the source of truth
+  rather than pure auto-detection.
+- **Draft-first PR.** On a green gate the tool pushes to `origin` and opens the
+  PR as a draft. Promotion to ready is a manual developer action.
+- **PR description ownership.** The tool writes and upgrades the description on
+  material change by default. A human edit, or an explicit "leave it" signal,
+  locks the description and the tool never modifies it again.
+- **Watcher wake model.** The background poller checks CI and comments on an
+  interval with back-off and only wakes the session when state changes.
+- **Comment classification.** The watcher distinguishes mechanical comments (it
+  fixes and pushes) from subjective comments (it escalates). The exact boundary
+  is an open decision.
+- **Trivial-merge policy.** A moved `main` is auto-rebased only when the merge is
+  trivial, and the gate is always re-run afterward before the PR is considered
+  green. The precise definition of "trivial" is an open decision.
+- **Escalation transport.** Human-in-the-loop escalations use the existing
+  notification hook (`claude-notify.sh`), which opens the originating window on
+  click.
+- **Concurrency by windows.** Three to five concurrent streams are handled by one
+  window per stream, not by a supervisor. The OS and the developer's window
+  switcher provide the coordination.
+- **v1 reviewer.** The gate runs with Claude only in v1. Cross-model review
+  (Codex reviews, Claude implements) is designed for via configuration and
+  deferred.
+- **Plan capture on the issue.** The agreed plan is written to the GitHub issue,
+  not kept in the local session and not committed to the code repo. It lives in a
+  delimited, machine-managed "Plan" section of the issue body under the same
+  ownership rule as the PR description: the tool maintains it until the developer
+  edits that section, then it locks. The plan is reconciled at gate pass (if the
+  build diverged) and when review feedback materially changes the approach, so
+  the issue stays truthful across the life of the work. The PR description links
+  the issue with `Closes #N` and does not repeat the plan.
+
+## Testing Decisions
+
+- **What makes a good test here.** Assert on external, observable behavior of the
+  command surface: git state after a run, that only `origin` was pushed, that a
+  draft PR was requested, the resulting PR-description body, and cancel/rerun
+  outcomes. Do not assert on the agent's internal reasoning, which is
+  non-deterministic and verified by observation.
+- **Primary seam (aim for one).** An end-to-end test that drives `gate` and
+  `watch` against a disposable fixture git repo with `gh-axi` stubbed to return
+  canned CI states, canned review comments, and a canned moved-`main`. This one
+  seam exercises the full flow. The fixture config can also point a step at a
+  no-op stub skill and a stub version-manager prefix to prove config wiring
+  without a real Flutter toolchain.
+- **Secondary seam.** An isolated test of the PR-description ownership lock:
+  given a description marked human-owned, a subsequent run must not modify it.
+  This rule is the most likely to regress silently, so it earns its own test.
+- **Modules tested.** The `git`/`gh` helper scripts (push, open draft PR,
+  set/update description, detect CI status, detect new comments, detect and
+  rebase a moved `main`) and the description-ownership logic.
+- **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
+  end-to-end fixtures drive the pipeline against fixture repos with recorded
+  agent interactions. Imitate that fixture-driven, command-surface approach.
+
+## Out of Scope
+
+- A git proxy remote or any second remote. `origin` only, always.
+- A cross-stream dashboard or mission-control view. Status lives per window in
+  v1; a dashboard is a possible v2.
+- A Codex (or any cross-model) reviewer in v1. Designed for, deferred.
+- Any always-on hosted process. The tool is local; the developer keeps the
+  machine awake with caffeinate when work should continue during a break.
+- A supervisor process coordinating multiple streams.
+
+## Further Notes
+
+- The design deliberately splits `no-mistakes`' single background pipeline into a
+  foreground gate and a background watch, because putting the gate in the
+  background was the root of the "separation" and lost-sync pain.
+- The tool completes a workflow that starts with the existing `barry` and
+  `worktree` scripts. It is the missing back half.
+- Open questions to resolve before build: the config file
+  format and name (how a step declares "run this skill" vs "run this command,"
+  and how it carries a version-manager prefix), poll interval and back-off, the
+  precise "trivial merge" definition and its re-gate cost across three to five
+  streams, and the mechanical-vs-subjective comment boundary.
+- `gh-axi` is run on demand via `npx -y gh-axi`, so it needs no global install,
+  only a working `npx`.

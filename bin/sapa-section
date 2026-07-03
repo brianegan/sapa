@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""sapa-section — maintain a machine-managed section inside a body of text.
+
+Sapa owns a delimited section of a PR description or a GitHub issue body and
+keeps it current, but it must never clobber text a human has taken over. This
+tool applies that ownership rule deterministically so both the PR description
+and the plan-on-the-issue can reuse the exact same logic.
+
+A managed section looks like this:
+
+    <!-- sapa:MARKER hash=abc123 -->
+    ...machine-managed content...
+    <!-- /sapa:MARKER -->
+
+The `hash` is a checksum of the content Sapa last wrote. On update:
+
+  * No section present  -> create one (appended).
+  * Section present, hash matches current content -> Sapa still owns it, replace.
+  * Section present, hash does NOT match -> a human edited it, leave it untouched.
+  * Section marked `locked` (start tag `<!-- sapa:MARKER locked -->`) -> never
+    touched, regardless of content. Written when the human says "leave it".
+
+The updated body is printed to stdout. A one-word status is printed to stderr:
+`created`, `updated`, `locked-now`, `locked-edited`, or `locked`.
+
+Usage:
+    sapa-section MARKER --content-file NEW [--body-file BODY] [--lock]
+
+If --body-file is omitted the body is read from stdin. With --lock the section
+is written (or rewritten, if Sapa still owns it) as locked so it is never
+touched again.
+"""
+
+import argparse
+import hashlib
+import re
+import sys
+
+
+def content_hash(text: str) -> str:
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:12]
+
+
+def build_section(marker: str, content: str, locked: bool) -> str:
+    content = content.strip("\n")
+    if locked:
+        head = f"<!-- sapa:{marker} locked -->"
+    else:
+        head = f"<!-- sapa:{marker} hash={content_hash(content)} -->"
+    return f"{head}\n{content}\n<!-- /sapa:{marker} -->"
+
+
+def find_section(body: str, marker: str):
+    """Return (match, start_attrs, inner) or (None, None, None)."""
+    pattern = re.compile(
+        r"<!-- sapa:" + re.escape(marker) + r"(?P<attrs>[^>]*)-->\n"
+        r"(?P<inner>.*?)"
+        r"\n<!-- /sapa:" + re.escape(marker) + r" -->",
+        re.DOTALL,
+    )
+    m = pattern.search(body)
+    if not m:
+        return None, None, None
+    return m, m.group("attrs"), m.group("inner")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("marker")
+    parser.add_argument("--content-file", required=True)
+    parser.add_argument("--body-file")
+    parser.add_argument("--lock", action="store_true")
+    args = parser.parse_args()
+
+    with open(args.content_file, "r", encoding="utf-8") as f:
+        new_content = f.read()
+
+    if args.body_file:
+        with open(args.body_file, "r", encoding="utf-8") as f:
+            body = f.read()
+    else:
+        body = sys.stdin.read()
+
+    match, attrs, inner = find_section(body, args.marker)
+
+    if match is None:
+        section = build_section(args.marker, new_content, args.lock)
+        updated = body.rstrip("\n")
+        updated = (updated + "\n\n" + section) if updated else section
+        sys.stdout.write(updated + "\n")
+        sys.stderr.write("locked-now\n" if args.lock else "created\n")
+        return 0
+
+    attrs = attrs.strip()
+
+    # Explicitly locked by a human: never touch.
+    if "locked" in attrs:
+        sys.stdout.write(body)
+        sys.stderr.write("locked\n")
+        return 0
+
+    # Compare the stored hash against the current content's hash.
+    hash_match = re.search(r"hash=([0-9a-f]+)", attrs)
+    stored = hash_match.group(1) if hash_match else ""
+    if stored != content_hash(inner):
+        # A human edited the section since Sapa last wrote it. Hands off.
+        sys.stdout.write(body)
+        sys.stderr.write("locked-edited\n")
+        return 0
+
+    # Sapa still owns the section: replace it.
+    section = build_section(args.marker, new_content, args.lock)
+    updated = body[: match.start()] + section + body[match.end():]
+    sys.stdout.write(updated)
+    sys.stderr.write("locked-now\n" if args.lock else "updated\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
