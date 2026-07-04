@@ -8,23 +8,24 @@
 #
 # Usage:
 #   sapa-start <issue-number> [start-point]
-#   sapa-start <issue-number> --title "Some title"   # skip the gh-axi lookup
+#   sapa-start <issue-number> --title "Some title"   # skip the gh lookup
 #   sapa-start <issue-number> --print                # print the branch, don't run sapa-worktree
 #
-# GitHub access uses `gh-axi` (npx -y gh-axi). This script only reads the issue
-# and derives a branch; it never pushes, so the configurable push remote (see
-# `.sapa.yaml` `remote:`) does not apply here.
+# GitHub access uses `gh`. This script only reads the issue and derives a branch;
+# it never pushes, so the configurable push remote (see `.sapa.yaml` `remote:`)
+# does not apply here.
 
 set -euo pipefail
 
 issue=""
 title=""
+title_set=false
 start=""
 print_only=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --title) shift; title="${1:-}" ;;
+    --title) shift; title="${1:-}"; title_set=true ;;
     --print) print_only=true ;;
     --start) shift; start="${1:-}" ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -53,10 +54,8 @@ slugify() {
 
 # Fetch the title unless it was provided, so tests and offline use can skip the
 # network. Any failure just falls back to a bare-number branch.
-if [ -z "$title" ]; then
-  title="$(npx -y gh-axi issue view "$issue" 2>/dev/null \
-            | sed -nE 's/^[[:space:]]*title:[[:space:]]*(.+)$/\1/p' \
-            | head -1 || true)"
+if ! $title_set; then
+  title="$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)"
 fi
 
 slug="$(slugify "${title:-}")"

@@ -11,13 +11,13 @@ session.
 
 Rules (always): the configured remote (default `origin`) is the only remote —
 read it, the base branch, and the PR state from `sapa-config -p`; GitHub goes
-through `npx -y gh-axi`, never `gh`; never clobber human text (PR body and issue
-plan go through `sapa-section`).
+through `gh`; never clobber human text (PR body and issue plan go through
+`sapa-section`).
 
 ## Find the PR
 
-Use the PR for the current branch. `npx -y gh-axi pr view --full` (or
-`pr list --head <branch>`) to get its number and state.
+Use the PR for the current branch. `gh pr view` (or `gh pr list --head <branch>`)
+to get its number and state.
 
 ## The watch loop
 
@@ -25,17 +25,20 @@ Poll cheaply. Run the status check as a background process on an interval with
 back-off, and only wake to act when something actually changed, so the session
 is not burning tokens while it waits. On each change:
 
-- **CI is failing** (`npx -y gh-axi pr checks <N>`): read the failing job, fix the
+- **CI is failing** (`gh pr checks <N>`): read the failing job, fix the
   cause in the working tree, commit, and push. Re-check.
-- **A new review comment** (`npx -y gh-axi pr view <N> --comments --reviews`):
+- **A new review comment** (`gh pr view <N> --comments`):
   - Mechanical (rename, typo, obvious small fix): make the change, push, and
     reply that it is done.
   - Subjective or a judgement call: do not guess. Escalate to the user through
     the notification hook so clicking it opens this window, and wait.
-  - If a comment changes the approach, refresh the plan comment on the issue
-    with the same flow `/sapa-plan` step 4 uses: find the `sapa:plan` comment,
-    run its body through `sapa-section plan`, and patch it in place. If that
-    comment is locked or edited, leave it. Never touch the issue body.
+  - If a comment changes the approach, refresh the plan comment on the issue by
+    running `/sapa-plan` step 4's flow in full: find the `sapa:plan` comment,
+    read its body untruncated with `gh api .../issues/comments/<id> --jq .body`,
+    apply the same truncation guard (opening `<!-- sapa:plan` marker but no
+    closing one → stop, do not patch), then run it through `sapa-section plan`
+    and patch it in place. If that comment is locked or edited, leave it. Never
+    touch the issue body.
 - **The base branch has moved** and branch protection needs the branch up to
   date: if the rebase is trivial (no conflicts), rebase onto `<remote>/<base>`,
   re-run the gate (the `/sapa-submit --gate-only` steps), and push. If it is not
