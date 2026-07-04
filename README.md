@@ -110,6 +110,7 @@ gate:
 ## Test
 
 ```sh
-python3 tests/test_sapa_section.py
-bash tests/test_sapa_config.sh
+bash tests/run.sh
 ```
+
+CI runs the same suite on every push and PR (`.github/workflows/ci.yml`).

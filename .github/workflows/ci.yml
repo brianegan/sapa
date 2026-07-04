@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The bootstrap and teardown tests make real git commits, so give the
+      # runner a git identity before running the suite.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@sapa.test"
+          git config --global user.name "sapa ci"
+      - name: Run tests
+        run: bash tests/run.sh
