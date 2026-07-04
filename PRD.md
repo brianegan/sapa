@@ -5,9 +5,9 @@ Generated via `/to-prd` from the design conversation.
 
 ## Problem Statement
 
-I get into a piece of work cleanly with my own tooling (`barry` to clone or init
-a bare repo, `worktree` to spin up a worktree per stream), but nothing gets me
-out of one. After the code is written, everything is manual: I run quality
+I get into a piece of work cleanly with sapa's own tooling (`sapa-bootstrap` to
+clone or init a bare repo, `sapa-worktree` to spin up a worktree per stream), but
+nothing gets me out of one. After the code is written, everything is manual: I run quality
 checks by hand, hand-fix PR descriptions, feed CI failures back to the agent one
 at a time, and integrate a moved `main` myself. I do this across three to five
 streams at once, so the manual coordination compounds.
@@ -108,8 +108,8 @@ me through my existing notification hook, which opens the right window on click.
   agent-oriented replacement for `gh`, rather than calling `gh` directly. It is
   invoked on demand as `npx -y gh-axi`, so there is no global install to manage.
 - **Config discovery.** The tool finds its config by walking up from the current
-  directory until it finds a config file, the same pattern `worktree` uses to
-  locate `.bare`.
+  directory until it finds a config file, the same pattern `sapa-worktree` uses
+  to locate `.bare`.
 - **Config expressiveness.** A gate step can be either a shell command or a
   skill invocation (for example, the wingspan review skill as the review step),
   and commands can carry a version-manager prefix (for example `fvm dart
@@ -211,10 +211,11 @@ me through my existing notification hook, which opens the right window on click.
   This rule is the most likely to regress silently, so it earns its own test.
 - **Modules tested.** The deterministic helper scripts: `sapa-config`
   (walk-up discovery), `sapa-section` (the ownership-lock logic for both PR body
-  and issue plan), `sapa-start` (issue-to-branch-name derivation), and
-  `sapa-teardown` (clean-guarded worktree removal). The `gh-axi`-driven and
-  agent-driven parts (opening the PR, fixing CI, classifying comments) are
-  verified by observation, not unit tests.
+  and issue plan), `sapa-start` (issue-to-branch-name derivation), `sapa-teardown`
+  (clean-guarded worktree removal), and `sapa-bootstrap` (the `init` path builds
+  the `.bare` + `main` layout offline). The `gh-axi`-driven and agent-driven parts
+  (opening the PR, fixing CI, classifying comments) are verified by observation,
+  not unit tests, as is `sapa-worktree` (it fetches `origin` and opens an editor).
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
   end-to-end fixtures drive the pipeline against fixture repos with recorded
   agent interactions. Imitate that fixture-driven, command-surface approach.
@@ -234,8 +235,10 @@ me through my existing notification hook, which opens the right window on click.
 - The design deliberately splits `no-mistakes`' single background pipeline into a
   foreground gate and a background watch, because putting the gate in the
   background was the root of the "separation" and lost-sync pain.
-- The tool completes a workflow that starts with the existing `barry` and
-  `worktree` scripts. It is the missing back half.
+- The tool bundles the `sapa-bootstrap` and `sapa-worktree` scripts that get you
+  into a stream, so a fresh clone carries the whole workflow — from setting up a
+  worktree to a merged PR — rather than depending on tooling that lives only on
+  one machine.
 - Open questions to resolve before build: the config file
   format and name (how a step declares "run this skill" vs "run this command,"
   and how it carries a version-manager prefix), poll interval and back-off, the

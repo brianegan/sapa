@@ -21,7 +21,7 @@ with `sapa-section`).
 ## Step 1 — Locate the config
 
 Run `sapa-config -p` to print the discovered `.sapa.yaml` (it walks up from the
-current directory the way `worktree` finds `.bare`). If none is found, ask
+current directory the way `sapa-worktree` finds `.bare`). If none is found, ask
 whether to use a sensible default gate (test + format) or stop.
 
 Read these top-level keys (all optional):

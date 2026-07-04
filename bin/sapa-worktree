@@ -1,0 +1,88 @@
+#!/bin/bash
+# sapa-worktree — spin up a per-branch worktree off origin/main and open it.
+#
+# Walks up from the current directory to the project root (the parent of the
+# `.bare` directory that sapa-bootstrap creates), fetches origin, adds a worktree
+# for the given branch, runs an optional per-project setup hook, and opens the
+# tree in your editor.
+#
+# Usage:
+#   sapa-worktree <branch-name> [start-point]
+#
+# The editor is $EDITOR (falling back to $VISUAL). If neither is set the worktree
+# path is printed instead of opened.
+
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+if [ -z "${1:-}" ]; then
+  echo "sapa-worktree: expected a branch name" >&2
+  echo "usage: sapa-worktree <branch-name> [start-point]" >&2
+  exit 2
+fi
+
+input="$1"
+start="${2:-}"
+
+# Walk up from current directory until we find a .bare directory; its parent is the project root.
+project_root=""
+dir="${PWD:-$(pwd)}"
+while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+  if [ -d "$dir/.bare" ]; then
+    project_root="$dir"
+    break
+  fi
+  dir=$(dirname "$dir")
+done
+if [ -z "$project_root" ]; then
+  echo "sapa-worktree: no .bare directory in any parent of the current directory" >&2
+  exit 1
+fi
+
+# If the input looks like a remote ref (e.g. origin/my-feature), use the
+# remote as the start point and the rest as the branch name.
+if [ -z "$start" ] && [[ "$input" == */* ]]; then
+  remote="${input%%/*}"
+  if git -C "$project_root" remote | grep -qx "$remote"; then
+    start="$input"
+    branch="${input#*/}"
+  else
+    branch="$input"
+  fi
+else
+  branch="$input"
+fi
+
+worktree_dir="$project_root/$branch"
+
+git -C "$project_root" fetch origin
+
+# Default to origin/main when no start point is given.
+if [ -z "$start" ]; then
+  start="origin/main"
+fi
+
+git -C "$project_root" worktree add "$worktree_dir" -b "$branch" "$start"
+
+# Clean stale GIT_* env vars so tools that run git internally (e.g. FVM)
+# don't get confused by the worktree context.
+cd "$worktree_dir"
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRS 2>/dev/null || true
+
+# Run per-project setup if a .worktree-setup script exists at the project root.
+if [ -x "$project_root/.worktree-setup" ]; then
+  "$project_root/.worktree-setup"
+fi
+
+# Open the new worktree in the user's editor. Respect $EDITOR (then $VISUAL) so
+# this works on machines without VS Code's `code`; if neither is set, just print
+# the path so the caller knows where the worktree landed.
+editor="${EDITOR:-${VISUAL:-}}"
+if [ -n "$editor" ]; then
+  exec $editor "$worktree_dir"
+else
+  echo "$worktree_dir"
+fi
