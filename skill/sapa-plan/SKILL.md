@@ -23,7 +23,7 @@ locked.
 3. **Plan with the user.** Check the config for a planning skill: run
    `sapa-config -p` and look for a `plan:` key. If it names a skill, invoke that
    skill to run the discussion (for example wingspan `/plan` or
-   `/grill-me-with-docs`); if there is no config or no `plan:` key, discuss the
+   `/grill-with-docs`); if there is no config or no `plan:` key, discuss the
    approach here. Either way keep the plan about intent and decisions, not
    file-by-file code, and always continue to step 4 — recording it on the issue
    is sapa's durable value no matter who developed the plan.

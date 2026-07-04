@@ -73,7 +73,7 @@ the flow, each with a backward-compatible default:
 - `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
-  example wingspan `/plan` or `/grill-me-with-docs`). Omit it to use the built-in
+  example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
@@ -83,7 +83,7 @@ version-manager prefix) or a skill (`skill:`):
 base: main
 remote: origin
 pr: draft
-plan: /grill-me-with-docs
+plan: /grill-with-docs
 gate:
   - name: review
     skill: code-review

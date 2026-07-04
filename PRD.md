@@ -177,7 +177,7 @@ me through my existing notification hook, which opens the right window on click.
   the issue stays truthful across the life of the work. The PR description links
   the issue with `Closes #N` and does not repeat the plan. How the plan is
   *developed* is pluggable: `plan:` can point `/sapa-plan` at another skill
-  (wingspan `/plan`, `/grill-me-with-docs`) to run the discussion, but the
+  (wingspan `/plan`, `/grill-with-docs`) to run the discussion, but the
   record-to-issue-comment step always runs, since that durable capture — not the
   dialogue style — is sapa's contribution.
 
