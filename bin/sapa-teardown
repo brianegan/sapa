@@ -13,12 +13,13 @@
 #     window is closed for you.
 #
 # Closing the editor window: after removal it closes the VS Code window that was
-# open on the worktree, so there is no manual window management. It matches the
-# window by the worktree's basename (unique per stream) and is strictly
-# best-effort — macOS + VS Code only, and it never fails the teardown. Disable it
-# with `close_window: false` in `.sapa.yaml`. Set `SAPA_TEARDOWN_CLOSER` to a
-# command that receives the basename to override how the close is performed
-# (used by the tests).
+# open on the worktree, so there is no manual window management. It finds the
+# window by the worktree's basename (unique per stream) and presses that window's
+# own close button — only when exactly one window matches, so it can never touch
+# another window. Strictly best-effort — macOS + VS Code only, and it never fails
+# the teardown. Disable it with `close_window: false` in `.sapa.yaml`. Set
+# `SAPA_TEARDOWN_CLOSER` to a command that receives the basename to override how
+# the close is performed (used by the tests).
 #
 # Usage:
 #   sapa-teardown [worktree-path]   # defaults to the current directory
@@ -29,7 +30,9 @@ set -euo pipefail
 # Close the editor window open on the removed worktree. Best-effort: any failure
 # is swallowed so it can never break a teardown that has already done its work.
 # An override command (SAPA_TEARDOWN_CLOSER) takes the basename as $1; otherwise
-# we drive VS Code on macOS via System Events, matching the window by basename.
+# we drive VS Code on macOS via System Events. We press the close button of the
+# one window whose title matches the basename; if zero or several match, we close
+# nothing rather than risk closing the wrong window.
 close_editor_window() {
   local name="$1"
   if [ -n "${SAPA_TEARDOWN_CLOSER:-}" ]; then
@@ -44,14 +47,13 @@ on run argv
   tell application "System Events"
     if not (exists process "Code") then return
     tell process "Code"
-      repeat with w in windows
-        if name of w contains targetName then
-          perform action "AXRaise" of w
-          set frontmost to true
-          keystroke "w" using {command down, shift down}
-          return
-        end if
-      end repeat
+      set matches to (every window whose name contains targetName)
+      if (count of matches) is 1 then
+        try
+          perform action "AXPress" of ¬
+            (first button of (item 1 of matches) whose subrole is "AXCloseButton")
+        end try
+      end if
     end tell
   end tell
 end run
