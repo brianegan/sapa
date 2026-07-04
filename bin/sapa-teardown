@@ -10,13 +10,53 @@
 #   * It runs `git` from the project root, never from inside the worktree it is
 #     removing, so it works even when called from within that worktree. The
 #     caller's shell cwd will be invalid afterwards — that is expected, the
-#     window can be closed.
+#     window is closed for you.
+#
+# Closing the editor window: after removal it closes the VS Code window that was
+# open on the worktree, so there is no manual window management. It matches the
+# window by the worktree's basename (unique per stream) and is strictly
+# best-effort — macOS + VS Code only, and it never fails the teardown. Disable it
+# with `close_window: false` in `.sapa.yaml`. Set `SAPA_TEARDOWN_CLOSER` to a
+# command that receives the basename to override how the close is performed
+# (used by the tests).
 #
 # Usage:
 #   sapa-teardown [worktree-path]   # defaults to the current directory
 #   sapa-teardown --force [path]    # remove even with uncommitted changes
 
 set -euo pipefail
+
+# Close the editor window open on the removed worktree. Best-effort: any failure
+# is swallowed so it can never break a teardown that has already done its work.
+# An override command (SAPA_TEARDOWN_CLOSER) takes the basename as $1; otherwise
+# we drive VS Code on macOS via System Events, matching the window by basename.
+close_editor_window() {
+  local name="$1"
+  if [ -n "${SAPA_TEARDOWN_CLOSER:-}" ]; then
+    "$SAPA_TEARDOWN_CLOSER" "$name" || true
+    return 0
+  fi
+  [ "$(uname -s)" = "Darwin" ] || return 0
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript - "$name" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+on run argv
+  set targetName to item 1 of argv
+  tell application "System Events"
+    if not (exists process "Code") then return
+    tell process "Code"
+      repeat with w in windows
+        if name of w contains targetName then
+          perform action "AXRaise" of w
+          set frontmost to true
+          keystroke "w" using {command down, shift down}
+          return
+        end if
+      end repeat
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
 
 force=false
 target=""
@@ -52,6 +92,27 @@ fi
 
 branch="$(git -C "$target" rev-parse --abbrev-ref HEAD)"
 
+# Decide now, while the worktree (and its .sapa.yaml) still exists, whether to
+# close the editor window afterwards. Absent or truthy `close_window` = close.
+window_name="$(basename "$target")"
+close_enabled=true
+# Resolve sapa-config: prefer PATH, fall back to a sibling of this script, so the
+# opt-out is honoured even when teardown is invoked by an absolute path with an
+# empty PATH.
+sapa_config="$(command -v sapa-config || true)"
+if [ -z "$sapa_config" ] && [ -x "$(dirname "$0")/sapa-config" ]; then
+  sapa_config="$(dirname "$0")/sapa-config"
+fi
+if [ -n "$sapa_config" ]; then
+  cfg_val="$("$sapa_config" -p --start "$target" 2>/dev/null \
+             | sed -nE 's/^[[:space:]]*close_window:[[:space:]]*([^#[:space:]]+).*$/\1/p' \
+             | head -1 \
+             | tr '[:upper:]' '[:lower:]' || true)"
+  case "$cfg_val" in
+    false|no|off|0) close_enabled=false ;;
+  esac
+fi
+
 # Guard: never destroy uncommitted work.
 if ! $force && [ -n "$(git -C "$target" status --porcelain)" ]; then
   echo "sapa-teardown: $target has uncommitted changes; not removing." >&2
@@ -72,3 +133,9 @@ if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
 fi
 
 echo "sapa-teardown: removed worktree $target and branch $branch"
+
+# Best-effort, last: closing the window kills the terminal running this script
+# when invoked from inside it, which is exactly the intended terminal action.
+if $close_enabled; then
+  close_editor_window "$window_name"
+fi

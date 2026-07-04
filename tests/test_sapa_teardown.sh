@@ -6,14 +6,28 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TEARDOWN="$HERE/../bin/sapa-teardown"
+# Put bin on PATH so teardown can resolve sapa-config for the close_window key.
+export PATH="$HERE/../bin:$PATH"
 
 pass=0; fail=0
 ok()   { echo "ok   $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL $1"; fail=$((fail+1)); }
 
+# Stub the window closer so no real osascript ever runs during tests (it would
+# otherwise try to close live VS Code windows on a developer's mac). The stub
+# records each basename it is handed.
+closer="$(mktemp)"
+recorded="$(mktemp)"
+cat > "$closer" <<EOF
+#!/bin/bash
+printf '%s\n' "\$1" >> "$recorded"
+EOF
+chmod +x "$closer"
+export SAPA_TEARDOWN_CLOSER="$closer"
+
 # Build a bare-layout project: root/.bare + a main worktree + a feature worktree.
 root="$(mktemp -d)"
-trap 'rm -rf "$root"' EXIT
+trap 'rm -rf "$root" "$closer" "$recorded"' EXIT
 proj="$root/proj"
 mkdir -p "$proj"
 git init --bare "$proj/.bare" -q
@@ -27,6 +41,8 @@ git -C "$proj/main" worktree add -q "$proj/feature" -b feature
 out="$(bash "$TEARDOWN" "$proj/feature" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/feature" ]; then ok "removes clean worktree"; else bad "removes clean worktree ($out)"; fi
 if ! git -C "$proj/main" branch --list feature | grep -q feature; then ok "deletes local branch"; else bad "deletes local branch"; fi
+# By default the window closer runs with the worktree's basename.
+if grep -qx "feature" "$recorded"; then ok "closes window by default"; else bad "closes window by default (recorded: $(cat "$recorded"))"; fi
 
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
@@ -42,6 +58,25 @@ if [ $rc -eq 0 ] && [ ! -d "$proj/dirty" ]; then ok "force removes dirty worktre
 git -C "$proj/main" worktree add -q "$proj/inside" -b inside
 out="$(cd "$proj/inside" && bash "$TEARDOWN" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/inside" ]; then ok "removes cwd worktree from within"; else bad "removes cwd worktree from within (rc=$rc, $out)"; fi
+
+# --- close_window: false suppresses the window close ---
+printf 'close_window: false\n' > "$proj/.sapa.yaml"
+git -C "$proj/main" worktree add -q "$proj/noclose" -b noclose
+: > "$recorded"
+out="$(bash "$TEARDOWN" "$proj/noclose" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -s "$recorded" ]; then ok "close_window: false suppresses close"; else bad "close_window: false suppresses close (rc=$rc, recorded: $(cat "$recorded"))"; fi
+
+# --- opt-out is honoured even when sapa-config is not on PATH (sibling fallback) ---
+git -C "$proj/main" worktree add -q "$proj/nopath" -b nopath
+: > "$recorded"
+out="$(PATH=/usr/bin:/bin bash "$TEARDOWN" "$proj/nopath" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -s "$recorded" ]; then ok "opt-out honoured without sapa-config on PATH"; else bad "opt-out honoured without sapa-config on PATH (rc=$rc, recorded: $(cat "$recorded"))"; fi
+rm -f "$proj/.sapa.yaml"
+
+# --- a failing closer never fails the teardown ---
+git -C "$proj/main" worktree add -q "$proj/badcloser" -b badcloser
+out="$(SAPA_TEARDOWN_CLOSER=/bin/false bash "$TEARDOWN" "$proj/badcloser" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/badcloser" ]; then ok "failing closer does not fail teardown"; else bad "failing closer does not fail teardown (rc=$rc, $out)"; fi
 
 # --- refuses to remove the project root ---
 out="$(bash "$TEARDOWN" "$proj/main" 2>&1)"; rc=$?

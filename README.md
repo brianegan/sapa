@@ -36,7 +36,7 @@ Helper scripts, backing the skills so there's no duplicated logic:
 - `bin/sapa-section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
 - `bin/sapa-teardown` — remove a merged stream's worktree and local branch,
-  refusing if there are uncommitted changes.
+  refusing if there are uncommitted changes, then close its VS Code window.
 
 Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 
@@ -83,6 +83,10 @@ the flow, each with a backward-compatible default:
   dialogue. Either way sapa still records the agreed plan to the issue.
 - `gate_only_rebase:` — rebase onto the base even for `--gate-only` (default
   `false`). A full submit always rebases before gating regardless.
+- `close_window:` — after teardown removes a merged stream's worktree, close the
+  VS Code window that was open on it (default on; set `false` to keep it open).
+  macOS + VS Code only and best-effort: it matches the window by the worktree's
+  basename and never fails the teardown.
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`):
