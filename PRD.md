@@ -30,8 +30,10 @@ on demand as `npx -y gh-axi`. It runs as one fused flow by default, and the two
 jobs inside it stay distinct phases:
 
 - **Gate** is foreground and blocking. I invoke it when a stream is ready. It
-  runs in my working tree, I can cancel it to make a change and rerun, and on
-  green it pushes to `origin` and opens a draft PR with a written description.
+  rebases my branch onto the latest base first, so the gate runs against what
+  will actually merge, then runs in my working tree. I can cancel it to make a
+  change and rerun, and on green it pushes to `origin` and opens a draft PR with
+  a written description.
 - **Watch** is the same session monitoring its own PR through a cheap background
   poller. It fixes CI failures, addresses mechanical review comments, escalates
   subjective ones to me, and auto-rebases a trivially-moved `main` before
@@ -94,6 +96,9 @@ me through my existing notification hook, which opens the right window on click.
 42. As a developer, I want to attach watch to an existing PR without re-gating, so that I can resume monitoring from a fresh session.
 43. As a developer, I want the worktree removed and the local branch deleted when the PR merges, so that I do not manually tear down finished streams.
 44. As a developer, I want teardown skipped and flagged when the worktree has uncommitted changes, so that auto-cleanup never destroys unsaved work.
+45. As a developer, I want the gate to rebase my branch onto the latest base before running, so that a green gate reflects what will actually merge and branch-protection "must be up to date" never blocks me at merge time.
+46. As a developer, I want a rebase conflict to stop the gate and hand back to me rather than be auto-resolved, so that I keep control when the base has moved in a way that touches my work.
+47. As a developer, I want gate-only to skip the rebase by default but be able to opt into it via config, so that a quick work-in-progress check never moves my branch unless I ask it to.
 
 ## Implementation Decisions
 
@@ -132,6 +137,13 @@ me through my existing notification hook, which opens the right window on click.
 - **In-tree gate.** The gate operates on the developer's active working tree, not
   a disposable copy. Cancel is interrupting the session; rerun is invoking the
   gate again.
+- **Rebase before gating.** The gate rebases the branch onto `<remote>/<base>`
+  before it runs, so a green gate reflects the state that will actually merge, not
+  a stale base. A conflict stops the gate and hands back to the developer rather
+  than being auto-resolved. A full submit always rebases; gate-only skips it
+  unless `gate_only_rebase` is set in the config, so a quick work-in-progress
+  check never moves the branch. This is distinct from watch's trivial-merge
+  rebase, which reacts to the base moving after the PR is open.
 - **Configured checks.** The gate runs the project's configured review, test,
   docs, lint, and format steps from the discovered config as the source of truth
   rather than pure auto-detection.

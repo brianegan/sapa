@@ -18,8 +18,8 @@ Three `/sapa-*` skills, one per phase, so each shows up on its own in the `/`
 menu and can't wander into another phase:
 
 - `skill/sapa-plan` — read the issue, agree a plan, record it on the issue.
-- `skill/sapa-ship` — gate in the working tree, push to the configured remote,
-  open the PR (draft by default), then hand off to watch.
+- `skill/sapa-submit` — rebase onto the base, gate in the working tree, push to
+  the configured remote, open the PR (draft by default), then hand off to watch.
 - `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
   tear the stream down when it merges.
 
@@ -44,7 +44,7 @@ Put the helpers on your `PATH` and the skills where Claude Code can find them:
 for h in sapa-start sapa-config sapa-section sapa-teardown; do
   ln -sf "$PWD/bin/$h" ~/bin/$h
 done
-for s in sapa-plan sapa-ship sapa-watch; do
+for s in sapa-plan sapa-submit sapa-watch; do
   ln -sfn "$PWD/skill/$s" ~/.claude/skills/$s
 done
 ```
@@ -58,7 +58,7 @@ sapa-start 42     # issue 42 -> worktree, opens your editor
 # open Claude in the new window, then:
 /sapa-plan        # read issue 42, agree a plan, write it to the issue
 # ...implement...
-/sapa-ship        # gate, push, open a draft PR, start watching
+/sapa-submit      # rebase onto base, gate, push, open a draft PR, start watching
 # on merge, watch removes the worktree for you
 ```
 
@@ -67,7 +67,8 @@ sapa-start 42     # issue 42 -> worktree, opens your editor
 Drop a `.sapa.yaml` at the root of any repo. A few optional top-level keys tune
 the flow, each with a backward-compatible default:
 
-- `base:` — the branch PRs target (default `main`).
+- `base:` — the branch PRs target (default `main`). Submit rebases onto it before
+  gating.
 - `remote:` — the single remote to push to (default `origin`). Names your one
   remote; it never adds a second.
 - `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
@@ -75,6 +76,8 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
+- `gate_only_rebase:` — rebase onto the base even for `--gate-only` (default
+  `false`). A full submit always rebases before gating regardless.
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`):
@@ -84,6 +87,7 @@ base: main
 remote: origin
 pr: draft
 plan: /grill-with-docs
+gate_only_rebase: false
 gate:
   - name: review
     skill: code-review
