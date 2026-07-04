@@ -23,10 +23,9 @@ cancel-edit-rerun loop.
 
 ## Solution
 
-A Claude Code skill, plus a few small `git`/`gh-axi` helper scripts, that runs
+A Claude Code skill, plus a few small `git`/`gh` helper scripts, that runs
 inside the per-stream Claude session that already did the work. All GitHub
-operations go through `gh-axi`, an agent-oriented replacement for `gh`, invoked
-on demand as `npx -y gh-axi`. It runs as one fused flow by default, and the two
+operations go through `gh`. It runs as one fused flow by default, and the two
 jobs inside it stay distinct phases:
 
 - **Gate** is foreground and blocking. I invoke it when a stream is ready. It
@@ -80,7 +79,7 @@ me through my existing notification hook, which opens the right window on click.
 26. As a developer, I want the gate to run with Claude only in v1, so that I am not blocked by an external reviewer that still needs command permissions.
 27. As a developer, I want a cross-model reviewer (Codex reviews, Claude implements) to be designable later, so that I can add independent review without re-architecting.
 28. As a developer, I want no cross-stream dashboard in v1, so that the tool ships smaller and I rely on my windows and switcher.
-29. As a developer, I want all GitHub operations to go through `gh-axi` rather than `gh`, so that the tool uses my chosen agent-oriented GitHub interface.
+29. As a developer, I want all GitHub operations to go through `gh`, so that reads and writes are faithful — an agent-oriented wrapper that truncates long field values corrupts any flow that reads a body back to re-apply a managed section.
 30. As a developer, I want the tool to find its config by walking up from the current directory, so that it works from any worktree without per-invocation setup.
 31. As a developer, I want a gate step to be able to run a skill rather than a shell command, so that Flutter projects can use the wingspan review skill for the review step.
 32. As a developer, I want check commands to run through a version manager like `fvm`, so that analyze, test, and lint use the project's pinned toolchain instead of a global `flutter`/`dart` on PATH.
@@ -102,11 +101,14 @@ me through my existing notification hook, which opens the right window on click.
 
 ## Implementation Decisions
 
-- **Form factor.** A Claude Code skill plus small `git`/`gh-axi` helper scripts.
+- **Form factor.** A Claude Code skill plus small `git`/`gh` helper scripts.
   Not a binary, not a long-lived daemon, not a proxy remote.
-- **GitHub interface.** All GitHub operations go through `gh-axi`, an
-  agent-oriented replacement for `gh`, rather than calling `gh` directly. It is
-  invoked on demand as `npx -y gh-axi`, so there is no global install to manage.
+- **GitHub interface.** All GitHub operations go through `gh`. An earlier version
+  used `gh-axi` (`npx -y gh-axi`) for its token-efficient TOON output, but that
+  output truncates long field values at ~2000 chars in every mode, which corrupts
+  any reconcile that reads a comment or PR body back to re-apply a `sapa-section`
+  managed section. Faithful reads matter more here than token thrift, and `gh`
+  covers every command sapa uses.
 - **Config discovery.** The tool finds its config by walking up from the current
   directory until it finds a config file, the same pattern `sapa-worktree` uses
   to locate `.bare`.
@@ -201,7 +203,7 @@ me through my existing notification hook, which opens the right window on click.
   outcomes. Do not assert on the agent's internal reasoning, which is
   non-deterministic and verified by observation.
 - **Primary seam (aim for one).** An end-to-end test that drives `gate` and
-  `watch` against a disposable fixture git repo with `gh-axi` stubbed to return
+  `watch` against a disposable fixture git repo with `gh` stubbed to return
   canned CI states, canned review comments, and a canned moved-`main`. This one
   seam exercises the full flow. The fixture config can also point a step at a
   no-op stub skill and a stub version-manager prefix to prove config wiring
@@ -213,7 +215,7 @@ me through my existing notification hook, which opens the right window on click.
   (walk-up discovery), `sapa-section` (the ownership-lock logic for both PR body
   and issue plan), `sapa-start` (issue-to-branch-name derivation), `sapa-teardown`
   (clean-guarded worktree removal), and `sapa-bootstrap` (the `init` path builds
-  the `.bare` + `main` layout offline). The `gh-axi`-driven and agent-driven parts
+  the `.bare` + `main` layout offline). The `gh`-driven and agent-driven parts
   (opening the PR, fixing CI, classifying comments) are verified by observation,
   not unit tests, as is `sapa-worktree` (it fetches `origin` and opens an editor).
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
@@ -244,5 +246,5 @@ me through my existing notification hook, which opens the right window on click.
   and how it carries a version-manager prefix), poll interval and back-off, the
   precise "trivial merge" definition and its re-gate cost across three to five
   streams, and the mechanical-vs-subjective comment boundary.
-- `gh-axi` is run on demand via `npx -y gh-axi`, so it needs no global install,
-  only a working `npx`.
+- `gh` is assumed installed and authenticated (`gh auth status`); sapa shells out
+  to it for every GitHub operation.

@@ -15,8 +15,7 @@ surprise at merge time.
 
 Rules (always): the configured remote (default `origin`) is the only remote —
 its name is configurable but there is never a second one; GitHub goes through
-`npx -y gh-axi`, never `gh`; never clobber human text (the PR body is written
-with `sapa-section`).
+`gh`; never clobber human text (the PR body is written with `sapa-section`).
 
 ## Step 1 — Locate the config
 
@@ -88,15 +87,25 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
 3. Open it in the configured state. When `pr` is `draft` (the default):
 
    ```
-   npx -y gh-axi pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
+   gh pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
    ```
 
    When `pr` is `ready`, run the same command without `--draft`.
 
-   If a PR already exists for this branch, update it instead: read the current
-   body with `npx -y gh-axi pr view <N> --full`, pipe through
-   `sapa-section pr-description`, and `pr edit --body-file` only if the status is
-   `created`/`updated`. If `locked`/`locked-edited`, leave the body alone.
+   If a PR already exists for this branch, update it instead. Read the current
+   body untruncated, then run it through `sapa-section`:
+
+   ```
+   gh pr view <N> --json body --jq .body > /tmp/sapa-pr-existing.md
+   ```
+
+   Guard first: if `/tmp/sapa-pr-existing.md` has an opening
+   `<!-- sapa:pr-description` marker but no closing `<!-- /sapa:pr-description -->`,
+   the read is damaged — stop and report; do not edit, or you would append a
+   duplicate section. Otherwise pipe through
+   `sapa-section pr-description --body-file /tmp/sapa-pr-existing.md` and
+   `gh pr edit <N> --body-file` only if the status is `created`/`updated`. If
+   `locked`/`locked-edited`, leave the body alone.
 4. Report the PR URL.
 
 ## Step 5 — Reconcile the plan

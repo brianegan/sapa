@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for sapa-start's branch-name derivation (the deterministic part).
-# The gh-axi lookup and worktree hand-off are integration and not exercised here;
+# The gh lookup and worktree hand-off are integration and not exercised here;
 # --title and --print keep these offline.
 # Run: bash tests/test_sapa_start.sh
 

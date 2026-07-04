@@ -53,7 +53,7 @@ for s in sapa-plan sapa-submit sapa-watch; do
 done
 ```
 
-GitHub access uses `gh-axi`, invoked on demand as `npx -y gh-axi`.
+GitHub access uses `gh`.
 
 ## Flow
 
