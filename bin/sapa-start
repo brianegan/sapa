@@ -11,7 +11,9 @@
 #   sapa-start <issue-number> --title "Some title"   # skip the gh-axi lookup
 #   sapa-start <issue-number> --print                # print the branch, don't run worktree
 #
-# GitHub access uses `gh-axi` (npx -y gh-axi). `origin` is the only remote.
+# GitHub access uses `gh-axi` (npx -y gh-axi). This script only reads the issue
+# and derives a branch; it never pushes, so the configurable push remote (see
+# `.sapa.yaml` `remote:`) does not apply here.
 
 set -euo pipefail
 

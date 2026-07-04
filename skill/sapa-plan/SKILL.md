@@ -8,8 +8,9 @@ description: Read a stream's GitHub issue and agree a plan, then record it on th
 Turn a GitHub issue into an agreed plan, recorded on the issue as a dedicated
 comment so it is durable and visible rather than trapped in this session.
 
-Rules (always): `origin` is the only remote; GitHub goes through `npx -y gh-axi`,
-never `gh`; the plan lives in its own issue comment, never in the issue body —
+Rules (always): the configured remote (default `origin`) is the only remote;
+GitHub goes through `npx -y gh-axi`, never `gh`; the plan lives in its own issue
+comment, never in the issue body —
 leave the body byte-for-byte as the author wrote it. The comment is written with
 `sapa-section`, which refuses to overwrite a comment a human has edited or
 locked.
@@ -19,8 +20,13 @@ locked.
 1. **Find the issue.** Use the number the user gave, else derive it from the
    branch name (a leading number like `42-add-widget` → 42), else ask.
 2. **Read it.** `npx -y gh-axi issue view <N> --full`.
-3. **Plan with the user.** Discuss the approach until you agree. Keep the plan
-   about intent and decisions, not file-by-file code.
+3. **Plan with the user.** Check the config for a planning skill: run
+   `sapa-config -p` and look for a `plan:` key. If it names a skill, invoke that
+   skill to run the discussion (for example wingspan `/plan` or
+   `/grill-me-with-docs`); if there is no config or no `plan:` key, discuss the
+   approach here. Either way keep the plan about intent and decisions, not
+   file-by-file code, and always continue to step 4 — recording it on the issue
+   is sapa's durable value no matter who developed the plan.
 4. **Record it as an issue comment.** The plan goes in its own comment carrying
    the `sapa:plan` markers, never in the issue body.
 
