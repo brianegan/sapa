@@ -110,6 +110,13 @@ me through my existing notification hook, which opens the right window on click.
   and commands can carry a version-manager prefix (for example `fvm dart
   analyze`, `fvm flutter test`) so they use the project's pinned toolchain rather
   than a global binary on PATH. This extends the `no-mistakes` repo-config idea.
+  Alongside the gate list, optional top-level keys tune the flow with
+  backward-compatible defaults: `remote:` names the single remote (default
+  `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
+  `draft`), and `plan:` names a skill `/sapa-plan` delegates the planning
+  discussion to. Config stays agent-interpreted — `sapa-config` still just walks
+  up and prints the file; the skills read the keys the way they already read
+  `base`, so no parser is introduced.
 - **One fused flow, two phases, separable commands.** By default a single
   invocation runs the gate, and on green it pushes, opens the draft PR, and hands
   off to watch with no second command. The gate phase is foreground, blocking,
@@ -118,16 +125,20 @@ me through my existing notification hook, which opens the right window on click.
   needs, but the developer experiences one flow. Gate and watch remain callable
   on their own for gate-only (checks without pushing) and watch-only (attach to
   an existing PR without re-gating).
-- **Single remote.** `origin` is the only remote the tool ever touches. No proxy
-  or secondary push target is introduced.
+- **Single remote.** The tool touches exactly one remote, `origin` by default.
+  Its name is configurable via `remote:` for developers who name their remotes
+  deliberately, but there is never a second remote, proxy, or secondary push
+  target.
 - **In-tree gate.** The gate operates on the developer's active working tree, not
   a disposable copy. Cancel is interrupting the session; rerun is invoking the
   gate again.
 - **Configured checks.** The gate runs the project's configured review, test,
   docs, lint, and format steps from the discovered config as the source of truth
   rather than pure auto-detection.
-- **Draft-first PR.** On a green gate the tool pushes to `origin` and opens the
-  PR as a draft. Promotion to ready is a manual developer action.
+- **Draft-first PR.** On a green gate the tool pushes to the configured remote
+  and opens the PR as a draft by default; promotion to ready is then a manual
+  developer action. Repos where draft is pure overhead (typically solo) can set
+  `pr: ready` to open ready-for-review directly.
 - **PR description ownership.** The tool writes and upgrades the description on
   material change by default. A human edit, or an explicit "leave it" signal,
   locks the description and the tool never modifies it again.
@@ -164,7 +175,11 @@ me through my existing notification hook, which opens the right window on click.
   developer edits it, then it locks. The plan is reconciled at gate pass (if the
   build diverged) and when review feedback materially changes the approach, so
   the issue stays truthful across the life of the work. The PR description links
-  the issue with `Closes #N` and does not repeat the plan.
+  the issue with `Closes #N` and does not repeat the plan. How the plan is
+  *developed* is pluggable: `plan:` can point `/sapa-plan` at another skill
+  (wingspan `/plan`, `/grill-with-docs`) to run the discussion, but the
+  record-to-issue-comment step always runs, since that durable capture — not the
+  dialogue style — is sapa's contribution.
 
 ## Testing Decisions
 

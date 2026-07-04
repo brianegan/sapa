@@ -1,15 +1,18 @@
 ---
 name: sapa-ship
-description: Gate a stream in the working tree and ship it as a draft PR, then start watching it. Use when work is ready to go up, or the user says "ship it", "gate this", "sapa ship", or "/sapa-ship". Pass --gate-only to run the checks without pushing.
+description: Gate a stream in the working tree and ship it as a PR (draft by default), then start watching it. Use when work is ready to go up, or the user says "ship it", "gate this", "sapa ship", or "/sapa-ship". Pass --gate-only to run the checks without pushing.
 ---
 
 # sapa-ship
 
-Run the quality gate in the working tree, then push to `origin` and open a draft
-PR. On success, hand off to watching. Does not plan — that is `/sapa-plan`.
+Run the quality gate in the working tree, then push to the configured remote and
+open the PR. On success, hand off to watching. Does not plan — that is
+`/sapa-plan`.
 
-Rules (always): `origin` is the only remote; GitHub goes through `npx -y gh-axi`,
-never `gh`; never clobber human text (the PR body is written with `sapa-section`).
+Rules (always): the configured remote (default `origin`) is the only remote —
+its name is configurable but there is never a second one; GitHub goes through
+`npx -y gh-axi`, never `gh`; never clobber human text (the PR body is written
+with `sapa-section`).
 
 ## Step 1 — Locate the config
 
@@ -17,7 +20,14 @@ Run `sapa-config -p` to print the discovered `.sapa.yaml` (it walks up from the
 current directory the way `worktree` finds `.bare`). If none is found, ask
 whether to use a sensible default gate (test + format) or stop.
 
-The config is an ordered list of gate steps. Each has a `name` and either:
+Read these top-level keys (all optional):
+
+- `base:` — the branch the PR targets (default `main`).
+- `remote:` — the single remote to push to (default `origin`).
+- `pr:` — `draft` or `ready`, the state to open the PR in (default `draft`).
+- `gate:` — the ordered list of gate steps below.
+
+Each gate step has a `name` and either:
 
 - `run:` — a shell command, run verbatim in the working tree. It may carry a
   version-manager prefix such as `fvm flutter test`.
@@ -39,7 +49,7 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
 ## Step 3 — Ship
 
 1. Commit any uncommitted work with a clear message if needed.
-2. Push to `origin` only: `git push -u origin HEAD`.
+2. Push to the configured remote only: `git push -u <remote> HEAD`.
 3. Build the PR body in a managed section so it is protected from the start:
 
    ```
@@ -49,11 +59,13 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
 
    Append `\n\nCloses #<N>` so the PR links its issue. Do not repeat the plan;
    the plan lives on the issue.
-4. Open it as a **draft**:
+4. Open it in the configured state. When `pr` is `draft` (the default):
 
    ```
    npx -y gh-axi pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
    ```
+
+   When `pr` is `ready`, run the same command without `--draft`.
 
    If a PR already exists for this branch, update it instead: read the current
    body with `npx -y gh-axi pr view <N> --full`, pipe through

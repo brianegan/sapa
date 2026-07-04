@@ -2,12 +2,13 @@
 
 Sapa (Filipino for "stream") closes out a piece of work. It picks up after
 `barry` and `worktree` have put you in a worktree and the code is written, then
-gates the work, captures the plan on the GitHub issue, and ships it as a draft
-PR.
+gates the work, captures the plan on the GitHub issue, and ships it as a PR
+(draft by default).
 
 It is a Claude Code skill plus two small helper scripts. There is no daemon, no
 binary, and no second remote: everything runs in the Claude session that did the
-work, and `origin` is the only remote it touches.
+work, and it pushes to a single remote (`origin` by default; the name is
+configurable but there is never a second one).
 
 See [PRD.md](PRD.md) for the full design and rationale.
 
@@ -17,8 +18,8 @@ Three `/sapa-*` skills, one per phase, so each shows up on its own in the `/`
 menu and can't wander into another phase:
 
 - `skill/sapa-plan` — read the issue, agree a plan, record it on the issue.
-- `skill/sapa-ship` — gate in the working tree, push to `origin`, open a draft
-  PR, then hand off to watch.
+- `skill/sapa-ship` — gate in the working tree, push to the configured remote,
+  open the PR (draft by default), then hand off to watch.
 - `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
   tear the stream down when it merges.
 
@@ -63,11 +64,26 @@ sapa-start 42     # issue 42 -> worktree, opens your editor
 
 ## Config
 
-Drop a `.sapa.yaml` at the root of any repo. Each gate step is a shell command
-(`run:`, which may carry a version-manager prefix) or a skill (`skill:`):
+Drop a `.sapa.yaml` at the root of any repo. A few optional top-level keys tune
+the flow, each with a backward-compatible default:
+
+- `base:` — the branch PRs target (default `main`).
+- `remote:` — the single remote to push to (default `origin`). Names your one
+  remote; it never adds a second.
+- `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
+  repos often prefer `ready`; shared repos keep `draft`.
+- `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
+  example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
+  dialogue. Either way sapa still records the agreed plan to the issue.
+
+Each gate step under `gate:` is a shell command (`run:`, which may carry a
+version-manager prefix) or a skill (`skill:`):
 
 ```yaml
 base: main
+remote: origin
+pr: draft
+plan: /grill-with-docs
 gate:
   - name: review
     skill: code-review

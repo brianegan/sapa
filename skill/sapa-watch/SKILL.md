@@ -9,9 +9,10 @@ Watch this stream's PR and act on what happens, until it merges. Attaches to an
 existing PR without gating, so it can also resume monitoring from a fresh
 session.
 
-Rules (always): `origin` is the only remote; GitHub goes through `npx -y gh-axi`,
-never `gh`; never clobber human text (PR body and issue plan go through
-`sapa-section`).
+Rules (always): the configured remote (default `origin`) is the only remote —
+read it, the base branch, and the PR state from `sapa-config -p`; GitHub goes
+through `npx -y gh-axi`, never `gh`; never clobber human text (PR body and issue
+plan go through `sapa-section`).
 
 ## Find the PR
 
@@ -35,12 +36,14 @@ is not burning tokens while it waits. On each change:
     with the same flow `/sapa-plan` step 4 uses: find the `sapa:plan` comment,
     run its body through `sapa-section plan`, and patch it in place. If that
     comment is locked or edited, leave it. Never touch the issue body.
-- **`main` has moved** and branch protection needs the branch up to date: if the
-  rebase is trivial (no conflicts), rebase onto `origin/main`, re-run the gate
-  (the `/sapa-ship --gate-only` steps), and push. If it is not trivial, escalate.
+- **The base branch has moved** and branch protection needs the branch up to
+  date: if the rebase is trivial (no conflicts), rebase onto `<remote>/<base>`,
+  re-run the gate (the `/sapa-ship --gate-only` steps), and push. If it is not
+  trivial, escalate.
 
-The user may promote the draft to ready whenever they choose; keep watching
-across that transition. Their comments and colleagues' comments flow through the
+If the PR was opened as a draft, the user may promote it to ready whenever they
+choose; keep watching across that transition. (When it shipped ready there is
+nothing to promote.) Their comments and colleagues' comments flow through the
 same path.
 
 ## Teardown on merge
