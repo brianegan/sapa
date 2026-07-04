@@ -21,43 +21,85 @@
 # `SAPA_TEARDOWN_CLOSER` to a command that receives the basename to override how
 # the close is performed (used by the tests).
 #
+# Pressing another app's button goes through System Events, which macOS gates
+# behind Accessibility permission. If that permission is missing the close can't
+# happen, so — rather than fail silently — teardown prints a one-line hint
+# telling you to grant Accessibility to the app running this terminal (e.g.
+# Visual Studio Code) in System Settings > Privacy & Security > Accessibility.
+#
 # Usage:
 #   sapa-teardown [worktree-path]   # defaults to the current directory
 #   sapa-teardown --force [path]    # remove even with uncommitted changes
 
 set -euo pipefail
 
-# Close the editor window open on the removed worktree. Best-effort: any failure
-# is swallowed so it can never break a teardown that has already done its work.
-# An override command (SAPA_TEARDOWN_CLOSER) takes the basename as $1; otherwise
-# we drive VS Code on macOS via System Events. We press the close button of the
-# one window whose title matches the basename; if zero or several match, we close
-# nothing rather than risk closing the wrong window.
+# Close the editor window open on the removed worktree. Best-effort: it never
+# fails the teardown, which has already done its work by the time this runs. The
+# close mechanism reports a status so the one failure worth surfacing — macOS
+# denying Accessibility — becomes an actionable hint instead of silence. Status
+# is one of: `closed`, `no-match` (zero or several windows matched), `no-editor`
+# (VS Code not running), `error:<n>` (any failure, e.g. -25211 = no assistive
+# access), or empty (the close killed osascript before it could report — that
+# only happens on success, so treat it as `closed`).
+#
+# An override command (SAPA_TEARDOWN_CLOSER) takes the basename as $1 and emits
+# the same status on stdout; otherwise we drive VS Code on macOS via System
+# Events, pressing the close button of the one window whose title matches the
+# basename — if zero or several match, we close nothing rather than risk the
+# wrong window.
 close_editor_window() {
   local name="$1"
+  local result="" script=""
   if [ -n "${SAPA_TEARDOWN_CLOSER:-}" ]; then
-    "$SAPA_TEARDOWN_CLOSER" "$name" || true
-    return 0
-  fi
-  [ "$(uname -s)" = "Darwin" ] || return 0
-  command -v osascript >/dev/null 2>&1 || return 0
-  osascript - "$name" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+    result="$("$SAPA_TEARDOWN_CLOSER" "$name" 2>/dev/null)" || true
+  elif [ "$(uname -s)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
+    # Read the AppleScript into a variable with a plain heredoc, then feed it to
+    # osascript via a here-string. A heredoc placed *inside* $(...) trips a
+    # bash 3.2 (the macOS system bash) parser bug, so keep it out of the
+    # command substitution.
+    IFS= read -r -d '' script <<'APPLESCRIPT' || true
 on run argv
   set targetName to item 1 of argv
-  tell application "System Events"
-    if not (exists process "Code") then return
-    tell process "Code"
-      set matches to (every window whose name contains targetName)
-      if (count of matches) is 1 then
-        try
-          perform action "AXPress" of ¬
-            (first button of (item 1 of matches) whose subrole is "AXCloseButton")
-        end try
-      end if
+  try
+    tell application "System Events"
+      if not (exists process "Code") then return "no-editor"
+      tell process "Code"
+        -- Resolve the match to a concrete window index before touching its
+        -- close button. A compound reference like `first button of (item 1 of
+        -- (every window whose name contains X)) whose subrole is Y` makes
+        -- System Events mis-resolve the nested filter ("Invalid index") on any
+        -- window that is not frontmost; indexing first is reliable.
+        set idx to 0
+        repeat with i from 1 to (count of windows)
+          if (name of window i) contains targetName then
+            if idx is 0 then
+              set idx to i
+            else
+              return "no-match" -- several match; close nothing rather than guess
+            end if
+          end if
+        end repeat
+        if idx is 0 then return "no-match"
+        perform action "AXPress" of ¬
+          (first button of window idx whose subrole is "AXCloseButton")
+        return "closed"
+      end tell
     end tell
-  end tell
+  on error e number n
+    return "error:" & n
+  end try
 end run
 APPLESCRIPT
+    result="$(osascript - "$name" 2>&1 <<<"$script")" || true
+  fi
+
+  case "$result" in
+    ""|closed|no-editor|no-match) : ;;  # done, or a benign no-op — stay quiet
+    error:-25211|*"not allowed assistive access"*)
+      printf '%s\n' "sapa-teardown: couldn't close the editor window — grant Accessibility to the app running this terminal (e.g. Visual Studio Code) in System Settings > Privacy & Security > Accessibility, then it will close on the next teardown." >&2 ;;
+    *)
+      printf '%s\n' "sapa-teardown: couldn't close the editor window ($result); left it open." >&2 ;;
+  esac
 }
 
 force=false

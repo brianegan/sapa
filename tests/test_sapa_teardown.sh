@@ -78,6 +78,18 @@ git -C "$proj/main" worktree add -q "$proj/badcloser" -b badcloser
 out="$(SAPA_TEARDOWN_CLOSER=/bin/false bash "$TEARDOWN" "$proj/badcloser" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/badcloser" ]; then ok "failing closer does not fail teardown"; else bad "failing closer does not fail teardown (rc=$rc, $out)"; fi
 
+# --- a denied close (no Accessibility) surfaces a hint but still succeeds ---
+git -C "$proj/main" worktree add -q "$proj/denied" -b denied
+denier="$(mktemp)"
+printf '#!/bin/bash\necho "error:-25211"\n' > "$denier"; chmod +x "$denier"
+err="$(SAPA_TEARDOWN_CLOSER="$denier" bash "$TEARDOWN" "$proj/denied" 2>&1 >/dev/null)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/denied" ] && printf '%s' "$err" | grep -qi "Accessibility"; then
+  ok "denied close prints Accessibility hint and still succeeds"
+else
+  bad "denied close hint (rc=$rc, err: $err)"
+fi
+rm -f "$denier"
+
 # --- refuses to remove the project root ---
 out="$(bash "$TEARDOWN" "$proj/main" 2>&1)"; rc=$?
 # main is a worktree, not the root; the root itself has no branch checkout.
