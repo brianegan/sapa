@@ -1,5 +1,8 @@
 # Sapa's own gate config. Discovered by walking up from the current directory.
 base: main
+# Rebase onto base even for `--gate-only`. A full submit always rebases; this
+# only governs gate-only runs. Default off.
+gate_only_rebase: false
 gate:
   # A step can invoke a skill...
   - name: review

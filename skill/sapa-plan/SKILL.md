@@ -70,4 +70,4 @@ locked.
 
    Never run `issue edit`; the issue body stays exactly as the author wrote it.
 
-Stop here. Gating and shipping are `/sapa-ship`.
+Stop here. Gating and shipping are `/sapa-submit`.

@@ -1,6 +1,6 @@
 ---
 name: sapa-watch
-description: Monitor a stream's PR — fix CI failures, address review comments, keep it mergeable, and tear the stream down when it merges. Use to attach to an existing PR, or when the user says "watch this", "sapa watch", or "/sapa-watch". sapa-ship hands off here automatically.
+description: Monitor a stream's PR — fix CI failures, address review comments, keep it mergeable, and tear the stream down when it merges. Use to attach to an existing PR, or when the user says "watch this", "sapa watch", or "/sapa-watch". sapa-submit hands off here automatically.
 ---
 
 # sapa-watch
@@ -38,7 +38,7 @@ is not burning tokens while it waits. On each change:
     comment is locked or edited, leave it. Never touch the issue body.
 - **The base branch has moved** and branch protection needs the branch up to
   date: if the rebase is trivial (no conflicts), rebase onto `<remote>/<base>`,
-  re-run the gate (the `/sapa-ship --gate-only` steps), and push. If it is not
+  re-run the gate (the `/sapa-submit --gate-only` steps), and push. If it is not
   trivial, escalate.
 
 If the PR was opened as a draft, the user may promote it to ready whenever they
