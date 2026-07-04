@@ -56,5 +56,7 @@ sapa-teardown
 
 Run it from the project root or let the script relocate itself — it removes this
 worktree and deletes the local branch, and refuses if there are uncommitted
-changes. Report that the stream is merged and cleaned up; the window can be
-closed. This is the watch loop's terminal action, so stop after it.
+changes. It then closes the VS Code window that was open on the worktree, so
+there is no manual window management (macOS + VS Code, best-effort; disable with
+`close_window: false` in `.sapa.yaml`). Report that the stream is merged and
+cleaned up. This is the watch loop's terminal action, so stop after it.
