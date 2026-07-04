@@ -99,6 +99,7 @@ me through my existing notification hook, which opens the right window on click.
 46. As a developer, I want a rebase conflict to stop the gate and hand back to me rather than be auto-resolved, so that I keep control when the base has moved in a way that touches my work.
 47. As a developer, I want gate-only to skip the rebase by default but be able to opt into it via config, so that a quick work-in-progress check never moves my branch unless I ask it to.
 48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before it hands off to watch.
+49. As a developer, I want `/sapa-plan` to start the work automatically once the plan is recorded, so that I do not manually kick off implementation and submit after every plan, with a `--plan-only` flag and a `plan_auto_start` config key for when I just want the plan captured.
 
 ## Implementation Decisions
 
@@ -132,7 +133,12 @@ me through my existing notification hook, which opens the right window on click.
   session. They are distinct because they have different context and lifetime
   needs, but the developer experiences one flow. Gate and watch remain callable
   on their own for gate-only (checks without pushing) and watch-only (attach to
-  an existing PR without re-gating).
+  an existing PR without re-gating). The fusion extends upstream to planning too:
+  once `/sapa-plan` records the agreed plan it implements it in the working tree
+  and hands off to `/sapa-submit`, so a single command carries a stream from
+  issue through plan, build, PR, and watch. The plan-only escape mirrors
+  gate-only and watch-only — a `--plan-only` flag or `plan_auto_start: false` in
+  the config records the plan and stops when capture is all the developer wants.
 - **Single remote.** The tool touches exactly one remote, `origin` by default.
   Its name is configurable via `remote:` for developers who name their remotes
   deliberately, but there is never a second remote, proxy, or secondary push

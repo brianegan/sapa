@@ -61,9 +61,8 @@ GitHub access uses `gh`.
 sapa-bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
 sapa-start 42     # issue 42 -> worktree, opens your editor
 # open Claude in the new window, then:
-/sapa-plan        # read issue 42, agree a plan, write it to the issue
-# ...implement...
-/sapa-submit      # rebase onto base, gate, push, open a draft PR, start watching
+/sapa-plan        # read issue 42, agree a plan, record it, then implement and submit
+# (use /sapa-plan --plan-only, or set plan_auto_start: false, to stop after the plan)
 # on merge, watch removes the worktree for you
 ```
 
@@ -81,6 +80,10 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
+- `plan_auto_start:` — after `/sapa-plan` records the plan, implement it and hand
+  off to `/sapa-submit` (default `true`). Set `false` (or pass `/sapa-plan
+  --plan-only`) to record the plan and stop, so `/sapa-submit` is a deliberate
+  next step.
 - `gate_only_rebase:` — rebase onto the base even for `--gate-only` (default
   `false`). A full submit always rebases before gating regardless.
 - `close_window:` — after teardown removes a merged stream's worktree, close the
@@ -97,6 +100,7 @@ base: main
 remote: origin
 pr: draft
 plan: /grill-with-docs
+plan_auto_start: true
 gate_only_rebase: false
 gate:
   - name: review
