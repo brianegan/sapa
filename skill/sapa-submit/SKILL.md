@@ -90,7 +90,8 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
    gh pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
    ```
 
-   When `pr` is `ready`, run the same command without `--draft`.
+   When `pr` is `ready`, run the same command without `--draft`. Either command
+   prints the new PR URL to stdout — note it for the ship summary in Step 6.
 
    If a PR already exists for this branch, update it instead. Read the current
    body untruncated, then run it through `sapa-section`:
@@ -105,8 +106,8 @@ If invoked with `--gate-only`, stop here after reporting the result. Do not push
    duplicate section. Otherwise pipe through
    `sapa-section pr-description --body-file /tmp/sapa-pr-existing.md` and
    `gh pr edit <N> --body-file` only if the status is `created`/`updated`. If
-   `locked`/`locked-edited`, leave the body alone.
-4. Report the PR URL.
+   `locked`/`locked-edited`, leave the body alone. Either way, note the URL for
+   the summary with `gh pr view <N> --json url --jq .url`.
 
 ## Step 5 — Reconcile the plan
 
@@ -116,8 +117,17 @@ comment, build it through `sapa-section plan`, and post or patch it in place. If
 that comment is `locked`/`locked-edited`, the user owns it — leave it and note
 the divergence in the ship summary. Never touch the issue body.
 
-## Step 6 — Hand off to watch
+## Step 6 — Summarize and hand off to watch
 
-Unless the user asked to gate only, begin watching now by invoking the
-**sapa-watch** skill for this PR. That is the fused default: submitting flows
-straight into watching with no second command from the user.
+Print a short ship summary that leads with the PR URL on its own line so the
+terminal makes it clickable, then one line of key facts:
+
+```
+<PR URL>
+<title> · <draft|ready> · base <base> · Closes #<N>
+```
+
+Carry any plan divergence noted in Step 5 into this summary. Then, unless the
+user asked to gate only, begin watching now by invoking the **sapa-watch** skill
+for this PR. That is the fused default: submitting flows straight into watching
+with no second command from the user.

@@ -98,6 +98,7 @@ me through my existing notification hook, which opens the right window on click.
 45. As a developer, I want the gate to rebase my branch onto the latest base before running, so that a green gate reflects what will actually merge and branch-protection "must be up to date" never blocks me at merge time.
 46. As a developer, I want a rebase conflict to stop the gate and hand back to me rather than be auto-resolved, so that I keep control when the base has moved in a way that touches my work.
 47. As a developer, I want gate-only to skip the rebase by default but be able to opt into it via config, so that a quick work-in-progress check never moves my branch unless I ask it to.
+48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before it hands off to watch.
 
 ## Implementation Decisions
 
