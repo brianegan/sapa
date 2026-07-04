@@ -85,8 +85,9 @@ the flow, each with a backward-compatible default:
   `false`). A full submit always rebases before gating regardless.
 - `close_window:` — after teardown removes a merged stream's worktree, close the
   VS Code window that was open on it (default on; set `false` to keep it open).
-  macOS + VS Code only and best-effort: it matches the window by the worktree's
-  basename and never fails the teardown.
+  macOS + VS Code only and best-effort: it presses the close button of the one
+  window matching the worktree's basename (closing nothing if zero or several
+  match) and never fails the teardown.
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`):
