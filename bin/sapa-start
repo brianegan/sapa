@@ -2,14 +2,14 @@
 # sapa-start — turn a GitHub issue into a worktree, ready to plan.
 #
 # Replaces the manual dance of creating a branch on GitHub, copying the name,
-# and running `worktree`. Given an issue number, it derives a branch name from
-# the issue title and hands off to your existing `worktree` script (which creates
-# the worktree off origin/main and opens your editor).
+# and running `sapa-worktree`. Given an issue number, it derives a branch name
+# from the issue title and hands off to `sapa-worktree` (which creates the
+# worktree off origin/main and opens your editor).
 #
 # Usage:
 #   sapa-start <issue-number> [start-point]
 #   sapa-start <issue-number> --title "Some title"   # skip the gh-axi lookup
-#   sapa-start <issue-number> --print                # print the branch, don't run worktree
+#   sapa-start <issue-number> --print                # print the branch, don't run sapa-worktree
 #
 # GitHub access uses `gh-axi` (npx -y gh-axi). This script only reads the issue
 # and derives a branch; it never pushes, so the configurable push remote (see
@@ -71,9 +71,9 @@ if $print_only; then
   exit 0
 fi
 
-# Hand off to the existing worktree tool, which creates the tree and opens code.
+# Hand off to sapa-worktree, which creates the tree and opens your editor.
 if [ -n "$start" ]; then
-  exec worktree "$branch" "$start"
+  exec sapa-worktree "$branch" "$start"
 else
-  exec worktree "$branch"
+  exec sapa-worktree "$branch"
 fi

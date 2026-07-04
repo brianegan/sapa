@@ -2,7 +2,7 @@
 # sapa-config — locate the Sapa config for the current stream.
 #
 # Walks up from the current directory until it finds a `.sapa.yaml`, the same
-# way `worktree` walks up to find `.bare`. Prints the path by default, or the
+# way `sapa-worktree` walks up to find `.bare`. Prints the path by default, or the
 # contents with -p/--print. Exits non-zero if no config is found.
 #
 # Usage:
