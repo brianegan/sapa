@@ -1,5 +1,7 @@
 # Sapa's own gate config. Discovered by walking up from the current directory.
 base: main
+# Open PRs ready for review rather than as drafts.
+pr: ready
 # Rebase onto base even for `--gate-only`. A full submit always rebases; this
 # only governs gate-only runs. Default off.
 gate_only_rebase: false
