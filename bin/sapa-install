@@ -35,7 +35,7 @@ esac
 # The helpers that go on PATH (including this script, so uninstall stays
 # reachable) and the skills that go into each agent's skills directory.
 BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
-SKILLS="sapa-plan sapa-submit sapa-watch"
+SKILLS="sapa-plan sapa-build sapa-gate sapa-submit sapa-watch sapa-flow"
 
 # Source is the clone this script lives in: bin/sapa-install -> repo root.
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
