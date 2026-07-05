@@ -35,8 +35,10 @@ is not burning tokens while it waits. On each change:
   - If a comment changes the approach, refresh the plan comment on the issue by
     running `/sapa-plan` step 4's flow in full: find the `sapa:plan` comment,
     read its body untruncated with `gh api .../issues/comments/<id> --jq .body`,
-    apply the same truncation guard (opening `<!-- sapa:plan` marker but no
-    closing one → stop, do not patch), then run it through `sapa-section plan`
+    apply the same truncation guard (a `<!-- sapa:plan hash=… -->` or
+    `<!-- sapa:plan locked -->` wrapper line with no matching `<!-- /sapa:plan -->`
+    close → stop, do not patch; a marker quoted inline in prose does not count),
+    then run it through `sapa-section plan`
     and patch it in place. If that comment is locked or edited, leave it. Never
     touch the issue body.
 - **The base branch has moved** and branch protection needs the branch up to
