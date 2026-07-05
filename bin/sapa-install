@@ -1,0 +1,112 @@
+#!/bin/bash
+# sapa-install — link sapa's helpers onto PATH and its skills into your agents.
+#
+# Symlinks the bin/ helpers into a PATH directory and the skill/ directories
+# into every coding agent that's installed (Claude Code, Codex — both read the
+# same SKILL.md format). Links point into the clone you run this from, so a plain
+# clone-and-run works; a sapa developer runs it from their `main` checkout so the
+# links track merged code. Re-running is safe (idempotent).
+#
+# Usage:
+#   sapa-install              # link helpers and skills
+#   sapa-install uninstall    # remove the symlinks sapa created
+#
+# Environment:
+#   SAPA_BIN_DIR   where helpers are linked (default ~/.local/bin).
+#   SAPA_AGENTS    space/comma-separated agents to target (e.g. "claude codex").
+#                  When unset, every agent whose ~/.<agent> directory exists is
+#                  targeted.
+
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+mode="install"
+case "${1:-}" in
+  "") ;;
+  uninstall) mode="uninstall" ;;
+  *) echo "sapa-install: unknown argument: $1" >&2
+     echo "usage: sapa-install [uninstall]" >&2
+     exit 2 ;;
+esac
+
+# The helpers that go on PATH (including this script, so uninstall stays
+# reachable) and the skills that go into each agent's skills directory.
+BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
+SKILLS="sapa-plan sapa-submit sapa-watch"
+
+# Source is the clone this script lives in: bin/sapa-install -> repo root.
+SRC="$(cd "$(dirname "$0")/.." && pwd)"
+
+bin_dir="${SAPA_BIN_DIR:-$HOME/.local/bin}"
+
+# Resolve the agents to target: an explicit SAPA_AGENTS list (commas allowed),
+# otherwise every known agent whose home directory exists.
+agents=""
+if [ -n "${SAPA_AGENTS:-}" ]; then
+  agents="$(printf '%s' "$SAPA_AGENTS" | tr ',' ' ')"
+else
+  for a in claude codex; do
+    [ -d "$HOME/.$a" ] && agents="$agents $a"
+  done
+fi
+
+if [ "$mode" = "install" ]; then
+  mkdir -p "$bin_dir"
+  for h in $BINS; do
+    ln -sfn "$SRC/bin/$h" "$bin_dir/$h"
+  done
+  echo "sapa-install: linked $(echo $BINS | wc -w | tr -d ' ') helpers into $bin_dir"
+
+  if [ -n "${agents// }" ]; then
+    linked=""
+    for a in $agents; do
+      skills_dir="$HOME/.$a/skills"
+      mkdir -p "$skills_dir"
+      for s in $SKILLS; do
+        ln -sfn "$SRC/skill/$s" "$skills_dir/$s"
+      done
+      linked="$linked $a"
+    done
+    echo "sapa-install: linked skills into${linked}"
+  else
+    echo "sapa-install: no coding agents detected (~/.claude, ~/.codex); set SAPA_AGENTS to link skills anyway"
+  fi
+
+  # A PATH hint, not a failure — the helpers are linked either way.
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *) echo "sapa-install: note: $bin_dir is not on your PATH; add it, e.g. export PATH=\"$bin_dir:\$PATH\"" ;;
+  esac
+  exit 0
+fi
+
+# uninstall: remove an entry only when it is a symlink whose target looks like
+# one of ours (ends in /bin/<name> or /skill/<name>), so a regular file or a link
+# pointing elsewhere is never touched.
+removed=0
+skipped=0
+
+remove_link() {
+  # $1 = path to the link, $2 = glob the target must match to be ours.
+  local link="$1" want="$2"
+  [ -L "$link" ] || return 0
+  local target; target="$(readlink "$link")"
+  case "$target" in
+    $want) rm -f "$link"; removed=$((removed+1)) ;;
+    *) skipped=$((skipped+1)) ;;
+  esac
+}
+
+for h in $BINS; do
+  remove_link "$bin_dir/$h" "*/bin/$h"
+done
+for a in $agents; do
+  for s in $SKILLS; do
+    remove_link "$HOME/.$a/skills/$s" "*/skill/$s"
+  done
+done
+
+echo "sapa-install: removed $removed links (skipped $skipped not pointing into sapa)"
