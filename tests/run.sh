@@ -20,6 +20,7 @@ run test_sapa_config.sh    bash    "$HERE/test_sapa_config.sh"
 run test_sapa_bootstrap.sh bash    "$HERE/test_sapa_bootstrap.sh"
 run test_sapa_start.sh     bash    "$HERE/test_sapa_start.sh"
 run test_sapa_teardown.sh  bash    "$HERE/test_sapa_teardown.sh"
+run test_sapa_install.sh   bash    "$HERE/test_sapa_install.sh"
 
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: one or more test files failed"

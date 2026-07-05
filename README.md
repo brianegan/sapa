@@ -42,18 +42,27 @@ Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 
 ## Install
 
-Put the helpers on your `PATH` and the skills where Claude Code can find them:
+Clone the repo, then run the installer from it:
 
 ```sh
-for h in sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown; do
-  ln -sf "$PWD/bin/$h" ~/bin/$h
-done
-for s in sapa-plan sapa-submit sapa-watch; do
-  ln -sfn "$PWD/skill/$s" ~/.claude/skills/$s
-done
+bin/sapa-install            # link helpers onto PATH, skills into your agents
+bin/sapa-install uninstall  # remove those symlinks
 ```
 
-GitHub access uses `gh`.
+It symlinks the `bin/` helpers into `~/.local/bin` and the `skill/` directories
+into every coding agent it finds — Claude Code (`~/.claude/skills`) and Codex
+(`~/.codex/skills`), which read the same `SKILL.md` format. The links point into
+the clone you run it from, so editing the source updates the installed copy;
+develop sapa from your `main` checkout so the links track merged code. Re-running
+is safe.
+
+Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
+`~/.local/bin`; the installer prints a hint if it isn't on your `PATH`), and
+`SAPA_AGENTS` (e.g. `SAPA_AGENTS="claude codex"`) forces the agents to target
+instead of auto-detecting.
+
+GitHub access uses `gh`. `npx skills add <repo>` is an alternative for the skills
+half only — it can't put the helpers on your `PATH`.
 
 ## Flow
 
