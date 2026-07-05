@@ -1,6 +1,6 @@
 ---
 name: sapa-plan
-description: Read a stream's GitHub issue, agree a plan, and record it on the issue, then implement it and hand off to /sapa-submit. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". Pass --plan-only to record the plan and stop without starting the work.
+description: Read a stream's GitHub issue, agree a plan, and record it on the issue as a durable comment, then stop. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". For the whole flow (plan, build, gate, submit, watch) use /sapa-flow.
 ---
 
 # sapa-plan
@@ -75,31 +75,11 @@ locked.
      ```
 
      If `locked` or `locked-edited`, the user has taken over the comment — leave
-     it unchanged (do not patch) and say so. This is not a stop: the plan is
-     still recorded, so carry that comment's current text into Step 5 as the
-     accepted plan.
+     it unchanged (do not patch) and say so. The plan is still recorded either
+     way; report where it landed and stop.
 
    Never run `issue edit`; the issue body stays exactly as the author wrote it.
 
-## Step 5 — Start the work
-
-Once the plan comment is recorded, begin the work in this working tree —
-implement the agreed plan, writing the code and tests it calls for — then invoke
-**`/sapa-submit`**, which rebases onto the base, gates, opens the draft PR, and
-hands off to watch. This is the fused default: planning flows straight into
-building and shipping with no second command from the developer, the same way
-submitting flows straight into watching. A recorded plan is an accepted plan,
-whether `sapa-section` reported `created`, `updated`, or a `locked`/`locked-edited`
-comment the developer already owns. When it is `locked`/`locked-edited`, the
-developer's version in the comment is authoritative — implement what the comment
-says, not an earlier draft.
-
-Skip this step — record the plan and stop — when either:
-
-- the skill was invoked with `--plan-only`, or
-- the config sets `plan_auto_start: false` (read it from the `sapa-config -p`
-  output, the same output Step 3 reads for the `plan:` key).
-
-`--plan-only` always wins for a single run regardless of config. When you skip,
-say plainly that the plan is recorded and the work was not started, and that
-`/sapa-submit` will pick it up when the developer is ready.
+Once the plan comment is recorded, this skill is done: the plan is captured and
+durable. Building it is `/sapa-build`, and `/sapa-flow` runs the whole sequence
+(plan, build, gate, submit, watch) when the developer wants it all in one.

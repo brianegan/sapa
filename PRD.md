@@ -25,25 +25,30 @@ cancel-edit-rerun loop.
 
 A Claude Code skill, plus a few small `git`/`gh` helper scripts, that runs
 inside the per-stream Claude session that already did the work. All GitHub
-operations go through `gh`. It runs as one fused flow by default, and the two
-jobs inside it stay distinct phases:
+operations go through `gh`. It runs as one fused flow by default — `sapa-flow`
+invokes each phase skill in turn — while every phase stays a distinct skill I can
+run on its own:
 
-- **Gate** is foreground and blocking. I invoke it when a stream is ready. It
-  rebases my branch onto the latest base first, so the gate runs against what
-  will actually merge, then runs in my working tree. I can cancel it to make a
-  change and rerun, and on green it pushes to `origin` and opens a draft PR with
-  a written description.
+- **Plan** agrees the approach and records it on the issue as a durable comment.
+- **Build** reads that recorded plan and implements the code and tests in my
+  working tree.
+- **Gate** is foreground and blocking. It rebases my branch onto the latest base
+  first, so the gate runs against what will actually merge, then runs the checks
+  in my working tree. I can cancel it to make a change and rerun; it certifies
+  green without pushing.
+- **Submit** pushes the green branch and opens (or updates) the PR with a written
+  description, then reconciles the plan on the issue.
 - **Watch** is the same session monitoring its own PR through a cheap background
   poller. It fixes CI failures, addresses mechanical review comments, escalates
   subjective ones to me, and auto-rebases a trivially-moved `main` before
   re-running the gate. When the PR merges, it tears the stream down: remove the
   worktree and delete the local branch, so I do not clean up by hand.
 
-On a green gate the flow hands off to watch automatically, so I never manually
-invoke watch after a gate. Watch starts in a draft posture and continues through
-promotion to ready. The two are still callable on their own for the edge cases:
-gate-only when I want checks without pushing, and watch-only when a PR already
-exists and I just want to attach to it without re-gating.
+`sapa-flow` chains these so I never manually step from one phase to the next, and
+it stops wherever a phase stops. Watch starts in a draft posture and continues
+through promotion to ready. Each phase is still callable on its own for the edge
+cases: gate to check without pushing, submit to open a PR I already gated, watch
+to attach to an existing PR without re-gating, build to resume a recorded plan.
 
 There is no second remote, no separate daemon, and no supervisor. Concurrency
 comes from running one window per stream, which I already do. Escalations reach
@@ -87,19 +92,19 @@ me through my existing notification hook, which opens the right window on click.
 34. As a developer, I want the agreed plan written to the GitHub issue rather than left in my local session, so that the plan is durable and visible even if I never finish.
 35. As a developer, I want the plan on the issue rather than in the code repo, so that it does not become a stale file I have to maintain in source.
 36. As a developer, I want the plan to live in a machine-managed comment on the issue that locks when I edit it, so that the tool keeps it current without clobbering my words or touching the issue body.
-37. As a developer, I want the issue's plan reconciled at gate pass, so that when what I built diverged from the plan, the issue reflects what actually shipped.
+37. As a developer, I want the issue's plan reconciled when I submit, so that when what I built diverged from the plan, the issue reflects what actually shipped.
 38. As a developer, I want the issue's plan updated when review feedback changes the approach, so that the issue never misrepresents the decision we landed on.
 39. As a developer, I want the PR description to link the issue with `Closes #N` rather than repeat the plan, so that intent and execution summary each live in one place.
-40. As a developer, I want a green gate to hand off to watch automatically, so that I do not have to manually invoke watch after every gate.
+40. As a developer, I want `sapa-flow` to move from each phase to the next automatically and to stop wherever a phase stops, so that a clean run needs no nudging while a blocked one never silently barrels ahead.
 41. As a developer, I want to run the gate on its own without pushing, so that I can check work in progress without opening a PR.
 42. As a developer, I want to attach watch to an existing PR without re-gating, so that I can resume monitoring from a fresh session.
 43. As a developer, I want the worktree removed and the local branch deleted when the PR merges, so that I do not manually tear down finished streams.
 44. As a developer, I want teardown skipped and flagged when the worktree has uncommitted changes, so that auto-cleanup never destroys unsaved work.
 45. As a developer, I want the gate to rebase my branch onto the latest base before running, so that a green gate reflects what will actually merge and branch-protection "must be up to date" never blocks me at merge time.
 46. As a developer, I want a rebase conflict to stop the gate and hand back to me rather than be auto-resolved, so that I keep control when the base has moved in a way that touches my work.
-47. As a developer, I want gate-only to skip the rebase by default but be able to opt into it via config, so that a quick work-in-progress check never moves my branch unless I ask it to.
-48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before it hands off to watch.
-49. As a developer, I want `/sapa-plan` to start the work automatically once the plan is recorded, so that I do not manually kick off implementation and submit after every plan, with a `--plan-only` flag and a `plan_auto_start` config key for when I just want the plan captured.
+47. As a developer, I want to resume a stream at any phase — build a recorded plan in a fresh session, or submit a branch I already gated — so that stepping in partway never forces me to rerun the earlier phases.
+48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before watch takes over.
+49. As a developer, I want a single `sapa-flow` command that carries a stream from its issue through plan, build, gate, PR, and watch, so that I do not manually kick off each phase, while every phase skill stays runnable on its own when I want just that step.
 
 ## Implementation Decisions
 
@@ -126,19 +131,16 @@ me through my existing notification hook, which opens the right window on click.
   discussion to. Config stays agent-interpreted — `sapa-config` still just walks
   up and prints the file; the skills read the keys the way they already read
   `base`, so no parser is introduced.
-- **One fused flow, two phases, separable commands.** By default a single
-  invocation runs the gate, and on green it pushes, opens the draft PR, and hands
-  off to watch with no second command. The gate phase is foreground, blocking,
-  and cancelable. The watch phase is a background poller owned by the same
-  session. They are distinct because they have different context and lifetime
-  needs, but the developer experiences one flow. Gate and watch remain callable
-  on their own for gate-only (checks without pushing) and watch-only (attach to
-  an existing PR without re-gating). The fusion extends upstream to planning too:
-  once `/sapa-plan` records the agreed plan it implements it in the working tree
-  and hands off to `/sapa-submit`, so a single command carries a stream from
-  issue through plan, build, PR, and watch. The plan-only escape mirrors
-  gate-only and watch-only — a `--plan-only` flag or `plan_auto_start: false` in
-  the config records the plan and stops when capture is all the developer wants.
+- **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
+  single invocation carries a stream from its issue through plan, build, gate,
+  PR, and watch by invoking each phase skill in turn, with no second command. It
+  holds no logic of its own and stops wherever a phase stops. Each phase is its
+  own skill with its own context and lifetime, and stays callable alone for the
+  edge cases: `sapa-plan` to capture a plan, `sapa-build` to resume a recorded
+  one, `sapa-gate` for checks without pushing, `sapa-submit` to open a PR that is
+  already green, and `sapa-watch` to attach to an existing PR without re-gating.
+  The gate phase is foreground, blocking, and cancelable; the watch phase is a
+  background poller owned by the same session.
 - **Single remote.** The tool touches exactly one remote, `origin` by default.
   Its name is configurable via `remote:` for developers who name their remotes
   deliberately, but there is never a second remote, proxy, or secondary push
@@ -146,13 +148,11 @@ me through my existing notification hook, which opens the right window on click.
 - **In-tree gate.** The gate operates on the developer's active working tree, not
   a disposable copy. Cancel is interrupting the session; rerun is invoking the
   gate again.
-- **Rebase before gating.** The gate rebases the branch onto `<remote>/<base>`
+- **Rebase before gating.** `sapa-gate` rebases the branch onto `<remote>/<base>`
   before it runs, so a green gate reflects the state that will actually merge, not
   a stale base. A conflict stops the gate and hands back to the developer rather
-  than being auto-resolved. A full submit always rebases; gate-only skips it
-  unless `gate_only_rebase` is set in the config, so a quick work-in-progress
-  check never moves the branch. This is distinct from watch's trivial-merge
-  rebase, which reacts to the base moving after the PR is open.
+  than being auto-resolved. This is distinct from watch's trivial-merge rebase,
+  which reacts to the base moving after the PR is open.
 - **Configured checks.** The gate runs the project's configured review, test,
   docs, lint, and format steps from the discovered config as the source of truth
   rather than pure auto-detection.
@@ -193,7 +193,7 @@ me through my existing notification hook, which opens the right window on click.
   dedicated, machine-managed "Plan" comment on the issue — never in the issue
   body, which stays byte-for-byte as the author wrote it — under the same
   ownership rule as the PR description: the tool maintains that comment until the
-  developer edits it, then it locks. The plan is reconciled at gate pass (if the
+  developer edits it, then it locks. The plan is reconciled at submit (if the
   build diverged) and when review feedback materially changes the approach, so
   the issue stays truthful across the life of the work. The PR description links
   the issue with `Closes #N` and does not repeat the plan. How the plan is

@@ -14,12 +14,18 @@ See [PRD.md](PRD.md) for the full design and rationale.
 
 ## What's here
 
-Three `/sapa-*` skills, one per phase, so each shows up on its own in the `/`
-menu and can't wander into another phase:
+`/sapa-*` skills, one per phase, so each shows up on its own in the `/` menu
+(type `sapa` to filter to just these) and can't wander into another phase, plus
+`sapa-flow` to chain them for the common case:
 
-- `skill/sapa-plan` — read the issue, agree a plan, record it on the issue.
-- `skill/sapa-submit` — rebase onto the base, gate in the working tree, push to
-  the configured remote, open the PR (draft by default), then hand off to watch.
+- `skill/sapa-flow` — drive a stream end to end: plan, build, gate, submit,
+  watch. The daily entry point; the rest are for running a single phase.
+- `skill/sapa-plan` — agree a plan and record it on the issue, then stop.
+- `skill/sapa-build` — read the recorded plan and implement the code and tests.
+- `skill/sapa-gate` — rebase onto the base and run the quality gate, certifying
+  the branch is green against what will merge.
+- `skill/sapa-submit` — push and open the PR (draft by default), then reconcile
+  the plan on the issue.
 - `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
   tear the stream down when it merges.
 
@@ -70,8 +76,8 @@ half only — it can't put the helpers on your `PATH`.
 sapa-bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
 sapa-start 42     # issue 42 -> worktree, opens your editor
 # open Claude in the new window, then:
-/sapa-plan        # read issue 42, agree a plan, record it, then implement and submit
-# (use /sapa-plan --plan-only, or set plan_auto_start: false, to stop after the plan)
+/sapa-flow        # issue 42 -> plan, build, gate, PR, watch, all in one
+# or run a single phase: /sapa-plan, /sapa-build, /sapa-gate, /sapa-submit, /sapa-watch
 # on merge, watch removes the worktree for you
 ```
 
@@ -80,8 +86,8 @@ sapa-start 42     # issue 42 -> worktree, opens your editor
 Drop a `.sapa.yaml` at the root of any repo. A few optional top-level keys tune
 the flow, each with a backward-compatible default:
 
-- `base:` — the branch PRs target (default `main`). Submit rebases onto it before
-  gating.
+- `base:` — the branch PRs target (default `main`). `sapa-gate` rebases onto it
+  before running the checks.
 - `remote:` — the single remote to push to (default `origin`). Names your one
   remote; it never adds a second.
 - `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
@@ -89,12 +95,6 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
-- `plan_auto_start:` — after `/sapa-plan` records the plan, implement it and hand
-  off to `/sapa-submit` (default `true`). Set `false` (or pass `/sapa-plan
-  --plan-only`) to record the plan and stop, so `/sapa-submit` is a deliberate
-  next step.
-- `gate_only_rebase:` — rebase onto the base even for `--gate-only` (default
-  `false`). A full submit always rebases before gating regardless.
 - `close_window:` — after teardown removes a merged stream's worktree, close the
   VS Code window that was open on it (default on; set `false` to keep it open).
   macOS + VS Code only and best-effort: it presses the close button of the one
@@ -109,8 +109,6 @@ base: main
 remote: origin
 pr: draft
 plan: /grill-with-docs
-plan_auto_start: true
-gate_only_rebase: false
 gate:
   - name: review
     skill: code-review
@@ -119,6 +117,10 @@ gate:
   - name: test
     run: fvm flutter test
 ```
+
+The gate is the only thing that checks the work — nothing downstream re-verifies
+it — so make the `gate:` steps count: include a real test, analyze, and review
+step, not a token check.
 
 ## Test
 
