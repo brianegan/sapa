@@ -52,10 +52,14 @@ Run `sapa-config -p` and read these top-level keys (all optional):
    gh pr view <N> --json body --jq .body > /tmp/sapa-pr-existing.md
    ```
 
-   Guard first: if `/tmp/sapa-pr-existing.md` has an opening
-   `<!-- sapa:pr-description` marker but no closing `<!-- /sapa:pr-description -->`,
-   the read is damaged — stop and report; do not edit, or you would append a
-   duplicate section. Otherwise pipe through
+   Guard first: the read is damaged only if a wrapper opening line —
+   `<!-- sapa:pr-description hash=… -->` or `<!-- sapa:pr-description locked -->`
+   alone on its own line, as `sapa-section` emits it — appears without its matching
+   `<!-- /sapa:pr-description -->` closing line. A marker quoted inline in prose (in
+   backticks, whatever its shape) is not a wrapper line and does not count; a PR
+   body may mention the marker, so match the emitted line, not the string. If
+   damaged, stop and report; do not edit, or you would append a duplicate section.
+   Otherwise pipe through
    `sapa-section pr-description --body-file /tmp/sapa-pr-existing.md` and
    `gh pr edit <N> --body-file` only if the status is `created`/`updated`. If
    `locked`/`locked-edited`, leave the body alone. Either way, note the URL for
