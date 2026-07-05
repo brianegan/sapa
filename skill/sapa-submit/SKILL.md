@@ -27,23 +27,44 @@ Run `sapa-config -p` and read these top-level keys (all optional):
 
 1. Push to the configured remote only: `git push -u <remote> HEAD` (add
    `--force-with-lease` if the gate's rebase rewrote already-pushed history).
-2. Build the PR body in a managed section so it is protected from the start:
+2. Compose the PR content. Keep it consistent — the title and body follow a
+   fixed shape so every sapa PR reads the same way.
+
+   **Title** — Conventional Commits: `<type>: <imperative summary>`, where `type`
+   is one of `feat`, `fix`, `docs`, `refactor`, `test`, `chore`. No trailing
+   period, no issue number (`Closes #<N>` links it), ~70 characters at most. This
+   becomes the squash-merge commit title, so write it as the changelog line for
+   the work.
+
+   **Body** — an execution summary of what shipped, never a repeat of the plan
+   (the plan lives on the issue). Three sections, in this order:
+
+   - `## Summary` — 1-3 sentences: what changed and why.
+   - `## Changes` — a short bullet list of the notable changes. Omit the whole
+     section for a trivial change the summary already covers.
+   - `## Testing` — how it was verified: name the gate steps that ran (from the
+     config, e.g. review + tests) and any manual checks.
+
+3. Build the PR body in a managed section so it is protected from the start.
+   Write the composed `## Summary` / `## Changes` / `## Testing` markdown to
+   `/tmp/sapa-pr.md`, then wrap it:
 
    ```
-   printf '%s' "$PR_SUMMARY" > /tmp/sapa-pr.md
    printf '' | sapa-section pr-description --content-file /tmp/sapa-pr.md > /tmp/sapa-pr-body.md
    ```
 
-   Append `\n\nCloses #<N>` so the PR links its issue. Do not repeat the plan;
-   the plan lives on the issue.
-3. Open it in the configured state. When `pr` is `draft` (the default):
+   Append `\n\nCloses #<N>` so the PR links its issue. It sits outside the
+   managed block on purpose, so it survives even after a human locks the body.
+4. Open it in the configured state, using the Conventional Commits title
+   composed above. When `pr` is `draft` (the default):
 
    ```
    gh pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
    ```
 
    When `pr` is `ready`, run the same command without `--draft`. Either command
-   prints the new PR URL to stdout — note it for the ship summary in Step 4.
+   prints the new PR URL to stdout — note it for the ship summary in Step 4
+   (Summarize).
 
    If a PR already exists for this branch, update it instead. Read the current
    body untruncated, then run it through `sapa-section`:

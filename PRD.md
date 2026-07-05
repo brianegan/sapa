@@ -163,6 +163,14 @@ me through my existing notification hook, which opens the right window on click.
 - **PR description ownership.** The tool writes and upgrades the description on
   material change by default. A human edit, or an explicit "leave it" signal,
   locks the description and the tool never modifies it again.
+- **PR format.** The title and body follow a fixed shape so every sapa PR reads
+  the same way. The title is Conventional Commits — `<type>: <imperative
+  summary>` (`feat|fix|docs|refactor|test|chore`), no issue number, since it
+  becomes the squash-merge commit title. The body is an execution summary of what
+  shipped, not a repeat of the plan, in three sections: `## Summary` (what
+  changed and why), `## Changes` (notable changes, omitted for trivial ones), and
+  `## Testing` (how it was verified). `Closes #N` sits outside the managed section
+  so it survives after a human locks the body.
 - **Watcher wake model.** The background poller checks CI and comments on an
   interval with back-off and only wakes the session when state changes.
 - **Comment classification.** The watcher distinguishes mechanical comments (it
