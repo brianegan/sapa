@@ -13,11 +13,11 @@ not gate — that is `/sapa-gate`.
 Rules (always): the configured remote (default `origin`) is the only remote — its
 name is configurable but there is never a second one; GitHub goes through `gh`;
 never clobber human text (the PR body and issue plan are written with
-`sapa-section`).
+`sapa section`).
 
 ## Step 1 — Locate the config
 
-Run `sapa-config -p` and read these top-level keys (all optional):
+Run `sapa config -p` and read these top-level keys (all optional):
 
 - `base:` — the branch the PR targets (default `main`).
 - `remote:` — the single remote to push to (default `origin`).
@@ -50,7 +50,7 @@ Run `sapa-config -p` and read these top-level keys (all optional):
    `/tmp/sapa-pr.md`, then wrap it:
 
    ```
-   printf '' | sapa-section pr-description --content-file /tmp/sapa-pr.md > /tmp/sapa-pr-body.md
+   printf '' | sapa section pr-description --content-file /tmp/sapa-pr.md > /tmp/sapa-pr-body.md
    ```
 
    Append `\n\nCloses #<N>` so the PR links its issue. It sits outside the
@@ -67,7 +67,7 @@ Run `sapa-config -p` and read these top-level keys (all optional):
    (Summarize).
 
    If a PR already exists for this branch, update it instead. Read the current
-   body untruncated, then run it through `sapa-section`:
+   body untruncated, then run it through `sapa section`:
 
    ```
    gh pr view <N> --json body --jq .body > /tmp/sapa-pr-existing.md
@@ -75,13 +75,13 @@ Run `sapa-config -p` and read these top-level keys (all optional):
 
    Guard first: the read is damaged only if a wrapper opening line —
    `<!-- sapa:pr-description hash=… -->` or `<!-- sapa:pr-description locked -->`
-   alone on its own line, as `sapa-section` emits it — appears without its matching
+   alone on its own line, as `sapa section` emits it — appears without its matching
    `<!-- /sapa:pr-description -->` closing line. A marker quoted inline in prose (in
    backticks, whatever its shape) is not a wrapper line and does not count; a PR
    body may mention the marker, so match the emitted line, not the string. If
    damaged, stop and report; do not edit, or you would append a duplicate section.
    Otherwise pipe through
-   `sapa-section pr-description --body-file /tmp/sapa-pr-existing.md` and
+   `sapa section pr-description --body-file /tmp/sapa-pr-existing.md` and
    `gh pr edit <N> --body-file` only if the status is `created`/`updated`. If
    `locked`/`locked-edited`, leave the body alone. Either way, note the URL for
    the summary with `gh pr view <N> --json url --jq .url`.
@@ -90,7 +90,7 @@ Run `sapa-config -p` and read these top-level keys (all optional):
 
 If what shipped diverged from the plan on the issue, refresh the plan comment by
 running `/sapa-plan` step 4's flow verbatim — find (or create) the `sapa:plan`
-comment, build it through `sapa-section plan`, and post or patch it in place. If
+comment, build it through `sapa section plan`, and post or patch it in place. If
 that comment is `locked`/`locked-edited`, the user owns it — leave it and note
 the divergence in the ship summary. Never touch the issue body.
 

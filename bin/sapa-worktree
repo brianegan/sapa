@@ -15,7 +15,7 @@
 set -euo pipefail
 
 case "${1:-}" in
-  -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 if [ -z "${1:-}" ]; then

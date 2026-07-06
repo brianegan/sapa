@@ -29,7 +29,7 @@ from the issue body.
 
    Guard the read: it is damaged only if a wrapper opening line —
    `<!-- sapa:plan hash=… -->` or `<!-- sapa:plan locked -->` alone on its own
-   line, as `sapa-section` emits it — appears without its matching
+   line, as `sapa section` emits it — appears without its matching
    `<!-- /sapa:plan -->` closing line. A marker quoted inline in prose (in
    backticks, whatever its shape) is not a wrapper line and does not count; a
    recorded plan may mention the marker, so match the emitted line, not the string.

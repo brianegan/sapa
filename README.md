@@ -29,19 +29,20 @@ See [PRD.md](PRD.md) for the full design and rationale.
 - `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
   tear the stream down when it merges.
 
-Helper scripts, backing the skills so there's no duplicated logic:
+The `sapa` command, backing the skills so there's no duplicated logic. One name
+on your `PATH` with a subcommand per helper (`sapa help` lists them):
 
-- `bin/sapa-bootstrap` — clone or `init` a repo into the `.bare` worktree layout
+- `sapa bootstrap` — clone or `init` a repo into the `.bare` worktree layout
   the rest of sapa expects.
-- `bin/sapa-worktree` — spin up a per-branch worktree off `origin/main` and open
+- `sapa worktree` — spin up a per-branch worktree off `origin/main` and open
   it in your editor (`$EDITOR`).
-- `bin/sapa-start` — turn an issue number into a worktree ready to plan (derives
-  the branch name from the issue title and calls `sapa-worktree`).
-- `bin/sapa-config` — find the project's `.sapa.yaml` by walking up, the way
-  `sapa-worktree` finds `.bare`.
-- `bin/sapa-section` — maintain a machine-managed section of a PR body or issue
+- `sapa start` — turn an issue number into a worktree ready to plan (derives
+  the branch name from the issue title and calls `sapa worktree`).
+- `sapa config` — find the project's `.sapa.yaml` by walking up, the way
+  `sapa worktree` finds `.bare`.
+- `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
-- `bin/sapa-teardown` — remove a merged stream's worktree and local branch,
+- `sapa teardown` — remove a merged stream's worktree and local branch,
   refusing if there are uncommitted changes, then close its VS Code window.
 
 Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
@@ -51,16 +52,18 @@ Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 Clone the repo, then run the installer from it:
 
 ```sh
-bin/sapa-install            # link helpers onto PATH, skills into your agents
-bin/sapa-install uninstall  # remove those symlinks
+bin/sapa install            # link sapa onto PATH, skills into your agents
+bin/sapa install uninstall  # remove those symlinks
 ```
 
-It symlinks the `bin/` helpers into `~/.local/bin` and the `skill/` directories
+It symlinks the `sapa` command into `~/.local/bin` and the `skill/` directories
 into every coding agent it finds — Claude Code (`~/.claude/skills`) and Codex
-(`~/.codex/skills`), which read the same `SKILL.md` format. The links point into
-the clone you run it from, so editing the source updates the installed copy;
-develop sapa from your `main` checkout so the links track merged code. Re-running
-is safe.
+(`~/.codex/skills`), which read the same `SKILL.md` format. The other helpers
+stay in the clone and `sapa` resolves back to them, so only one name lands on
+your `PATH`. The links point into the clone you run it from, so editing the
+source updates the installed copy; develop sapa from your `main` checkout so the
+links track merged code. Re-running is safe (and it clears any links left by the
+older one-command-per-helper layout).
 
 Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 `~/.local/bin`; the installer prints a hint if it isn't on your `PATH`), and
@@ -68,13 +71,13 @@ Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 instead of auto-detecting.
 
 GitHub access uses `gh`. `npx skills add <repo>` is an alternative for the skills
-half only — it can't put the helpers on your `PATH`.
+half only — it can't put the `sapa` command on your `PATH`.
 
 ## Flow
 
 ```sh
-sapa-bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
-sapa-start 42     # issue 42 -> worktree, opens your editor
+sapa bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
+sapa start 42     # issue 42 -> worktree, opens your editor
 # open Claude in the new window, then:
 /sapa-flow        # issue 42 -> plan, build, gate, PR, watch, all in one
 # or run a single phase: /sapa-plan, /sapa-build, /sapa-gate, /sapa-submit, /sapa-watch

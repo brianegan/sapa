@@ -1,0 +1,71 @@
+#!/bin/bash
+# sapa — one command for the whole stream toolkit.
+#
+# A thin dispatcher: `sapa <command> [args]` runs the matching helper. Only this
+# script goes on your PATH (sapa-install links it); it resolves its own location
+# back through that symlink to the clone and calls the sibling helpers in bin/ by
+# path, so they never need to be on PATH themselves.
+#
+# Usage:
+#   sapa <command> [args]      # run a command
+#   sapa help | -h | --help    # this help
+#   sapa <command> --help      # help for one command
+#
+# Commands:
+#   bootstrap   clone or init a repo into the .bare worktree layout
+#   worktree    spin up a per-branch worktree off origin/main and open it
+#   start       turn a GitHub issue into a worktree, ready to plan
+#   config      locate (or print) the .sapa.yaml for the current stream
+#   section     maintain a machine-managed section of a PR body or issue
+#   teardown    remove a merged stream's worktree and local branch
+#   install     link sapa onto PATH and its skills into your agents
+
+set -euo pipefail
+
+commands="bootstrap worktree start config section teardown install"
+
+usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
+
+cmd="${1:-}"
+case "$cmd" in
+  "")          usage >&2; exit 2 ;;
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+# Confine dispatch to the known commands so a typo can't reach some other
+# bin/sapa-* file (or a name we never meant to expose).
+found=false
+for c in $commands; do
+  [ "$c" = "$cmd" ] && found=true && break
+done
+if ! $found; then
+  echo "sapa: unknown command: $cmd" >&2
+  echo "commands: $commands" >&2
+  echo "run 'sapa help' for usage" >&2
+  exit 2
+fi
+
+# Resolve this script through its symlink chain to find the clone's bin/, where
+# the helpers live as siblings. A portable readlink loop — readlink -f is not
+# reliable on macOS's BSD tools — handling absolute and relative link targets.
+# A twin of this loop lives in bin/sapa-install (which resolves to the repo root
+# instead); keep the two in sync. They can't share a sourced helper without a
+# bootstrapping problem, since sapa-install must run pre-PATH from a fresh clone.
+self="$0"
+hops=0
+while [ -L "$self" ]; do
+  hops=$((hops+1))
+  if [ "$hops" -gt 40 ]; then
+    echo "sapa: too many symlink hops resolving $0 (cycle?)" >&2
+    exit 1
+  fi
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *)  self="$(dirname "$self")/$link" ;;
+  esac
+done
+bindir="$(cd "$(dirname "$self")" && pwd)"
+
+shift
+exec "$bindir/sapa-$cmd" "$@"

@@ -12,7 +12,7 @@ Rules (always): the configured remote (default `origin`) is the only remote;
 GitHub goes through `gh`; the plan lives in its own issue comment, never in the
 issue body —
 leave the body byte-for-byte as the author wrote it. The comment is written with
-`sapa-section`, which refuses to overwrite a comment a human has edited or
+`sapa section`, which refuses to overwrite a comment a human has edited or
 locked.
 
 ## Steps
@@ -21,7 +21,7 @@ locked.
    branch name (a leading number like `42-add-widget` → 42), else ask.
 2. **Read it.** `gh issue view <N>`.
 3. **Plan with the user.** Check the config for a planning skill: run
-   `sapa-config -p` and look for a `plan:` key. If it names a skill, invoke that
+   `sapa config -p` and look for a `plan:` key. If it names a skill, invoke that
    skill to run the discussion (for example wingspan `/plan` or
    `/grill-with-docs`); if there is no config or no `plan:` key, discuss the
    approach here. Either way keep the plan about intent and decisions, not
@@ -45,12 +45,12 @@ locked.
      post it (stderr status is `created`):
 
      ```
-     printf '' | sapa-section plan --content-file /tmp/sapa-plan.md > /tmp/sapa-comment.md
+     printf '' | sapa section plan --content-file /tmp/sapa-plan.md > /tmp/sapa-comment.md
      gh issue comment <N> --body-file /tmp/sapa-comment.md
      ```
 
    - **A sapa plan comment exists** — fetch its current body untruncated, then
-     feed it through `sapa-section` so the hash protection applies:
+     feed it through `sapa section` so the hash protection applies:
 
      ```
      gh api /repos/{owner}/{repo}/issues/comments/<id> --jq .body > /tmp/sapa-existing.md
@@ -58,15 +58,15 @@ locked.
 
      Guard before touching it: the read is damaged only if a wrapper opening line
      — `<!-- sapa:plan hash=… -->` or `<!-- sapa:plan locked -->` alone on its own
-     line, as `sapa-section` emits it — appears without its matching
+     line, as `sapa section` emits it — appears without its matching
      `<!-- /sapa:plan -->` closing line. A marker quoted inline in prose (in
      backticks, whatever its shape) is not a wrapper line and does not count; a
      recorded plan may mention the marker, so match the emitted line, not the
-     string. If damaged, stop, report it, and do not run `sapa-section` or patch;
+     string. If damaged, stop, report it, and do not run `sapa section` or patch;
      patching now would append a duplicate section. Otherwise continue:
 
      ```
-     sapa-section plan --content-file /tmp/sapa-plan.md --body-file /tmp/sapa-existing.md > /tmp/sapa-comment.md
+     sapa section plan --content-file /tmp/sapa-plan.md --body-file /tmp/sapa-existing.md > /tmp/sapa-comment.md
      ```
 
      If `updated`, patch that same comment in place — do not post a new one.

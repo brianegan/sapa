@@ -10,9 +10,9 @@ existing PR without gating, so it can also resume monitoring from a fresh
 session.
 
 Rules (always): the configured remote (default `origin`) is the only remote —
-read it, the base branch, and the PR state from `sapa-config -p`; GitHub goes
+read it, the base branch, and the PR state from `sapa config -p`; GitHub goes
 through `gh`; never clobber human text (PR body and issue plan go through
-`sapa-section`).
+`sapa section`).
 
 ## Find the PR
 
@@ -38,7 +38,7 @@ is not burning tokens while it waits. On each change:
     apply the same truncation guard (a `<!-- sapa:plan hash=… -->` or
     `<!-- sapa:plan locked -->` wrapper line with no matching `<!-- /sapa:plan -->`
     close → stop, do not patch; a marker quoted inline in prose does not count),
-    then run it through `sapa-section plan`
+    then run it through `sapa section plan`
     and patch it in place. If that comment is locked or edited, leave it. Never
     touch the issue body.
 - **The base branch has moved** and branch protection needs the branch up to
@@ -56,7 +56,7 @@ same path.
 When the PR is merged (`state: merged`), the stream is done. Tear it down:
 
 ```
-sapa-teardown
+sapa teardown
 ```
 
 Run it from the project root or let the script relocate itself — it removes this
