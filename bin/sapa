@@ -17,12 +17,13 @@
 #   start       turn a GitHub issue into a worktree, ready to plan
 #   config      locate (or print) the .sapa.yaml for the current stream
 #   section     maintain a machine-managed section of a PR body or issue
+#   watch       poll the current branch's PR and emit one line per change
 #   teardown    remove a merged stream's worktree and local branch
 #   install     link sapa onto PATH and its skills into your agents
 
 set -euo pipefail
 
-commands="bootstrap worktree start config section teardown install"
+commands="bootstrap worktree start config section watch teardown install"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 
