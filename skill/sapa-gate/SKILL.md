@@ -53,10 +53,15 @@ base.
 4. **Rebase onto the base.** `git rebase <remote>/<base>` using `base` from the
    config.
 
-At each rebase: already up to date → no-op, continue. **Conflict → stop.** Run
-`git rebase --abort`, report the conflict as a finding, and let the user resolve
-it before rerunning `/sapa-gate`. Never auto-resolve a rebase conflict — it is a
-judgement call.
+At each rebase: already up to date → no-op, continue. **On a conflict, resolve
+what is unambiguous and escalate the rest.** Inspect the conflict. When the
+correct resolution is clear and does not change how anything works — for example
+each side added a separate entry, or the two edits overlap textually but are
+independent — resolve it, `git add` the files, and `git rebase --continue`. When
+the resolution is a judgement call or could change behaviour, do not guess: leave
+the rebase stopped at that conflict, report the conflicting hunk as a finding, and
+escalate to the user. Resolve it their way, then `git rebase --continue`; do not
+certify green until the rebase completes cleanly.
 
 Once the rebase settles, the branch's changed files against the merge-base are
 `git diff --name-only <remote>/<base>...HEAD` — the diff the gate holds. Step 3

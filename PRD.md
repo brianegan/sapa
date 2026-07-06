@@ -101,7 +101,7 @@ me through my existing notification hook, which opens the right window on click.
 43. As a developer, I want the worktree removed and the local branch deleted when the PR merges, so that I do not manually tear down finished streams.
 44. As a developer, I want teardown skipped and flagged when the worktree has uncommitted changes, so that auto-cleanup never destroys unsaved work.
 45. As a developer, I want the gate to rebase my branch onto the latest base before running, so that a green gate reflects what will actually merge and branch-protection "must be up to date" never blocks me at merge time.
-46. As a developer, I want a rebase conflict to stop the gate and hand back to me rather than be auto-resolved, so that I keep control when the base has moved in a way that touches my work.
+46. As a developer, I want the gate to resolve unambiguous rebase conflicts and escalate only the ones where the resolution is a judgement call or could change behaviour, so that trivial overlaps do not interrupt me while behavioural decisions stay mine.
 47. As a developer, I want to resume a stream at any phase — build a recorded plan in a fresh session, or submit a branch I already gated — so that stepping in partway never forces me to rerun the earlier phases.
 48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before watch takes over.
 49. As a developer, I want a single `sapa-flow` command that carries a stream from its issue through plan, build, gate, PR, and watch, so that I do not manually kick off each phase, while every phase skill stays runnable on its own when I want just that step.
@@ -164,10 +164,12 @@ me through my existing notification hook, which opens the right window on click.
 - **Rebase before gating.** `sapa-gate` first integrates the branch's own remote
   head (`<remote>/<branch>`, when it exists) so a teammate's pushed commits are
   not lost to a later force-push, then rebases the branch onto `<remote>/<base>`,
-  so a green gate reflects the state that will actually merge, not a stale base. A
-  conflict at either rebase stops the gate and hands back to the developer rather
-  than being auto-resolved. This is distinct from watch's trivial-merge rebase,
-  which reacts to the base moving after the PR is open.
+  so a green gate reflects the state that will actually merge, not a stale base. On
+  a conflict at either rebase, the gate resolves what is unambiguous and escalates
+  only conflicts whose resolution is a judgement call or could change behaviour,
+  rather than guessing blindly or handing back every overlap. This is distinct from
+  watch's trivial-merge rebase, which reacts to the base moving after the PR is
+  open.
 - **Configured checks.** The gate runs the project's configured review, test,
   docs, lint, and format steps from the discovered config as the source of truth
   rather than pure auto-detection.
