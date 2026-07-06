@@ -105,6 +105,7 @@ me through my existing notification hook, which opens the right window on click.
 47. As a developer, I want to resume a stream at any phase — build a recorded plan in a fresh session, or submit a branch I already gated — so that stepping in partway never forces me to rerun the earlier phases.
 48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before watch takes over.
 49. As a developer, I want a single `sapa-flow` command that carries a stream from its issue through plan, build, gate, PR, and watch, so that I do not manually kick off each phase, while every phase skill stays runnable on its own when I want just that step.
+50. As a developer, I want the gate to integrate my branch's own remote head before rebasing onto the base, so that a teammate's commits pushed to the same branch are not lost when submit later force-pushes.
 
 ## Implementation Decisions
 
@@ -160,9 +161,11 @@ me through my existing notification hook, which opens the right window on click.
 - **In-tree gate.** The gate operates on the developer's active working tree, not
   a disposable copy. Cancel is interrupting the session; rerun is invoking the
   gate again.
-- **Rebase before gating.** `sapa-gate` rebases the branch onto `<remote>/<base>`
-  before it runs, so a green gate reflects the state that will actually merge, not
-  a stale base. A conflict stops the gate and hands back to the developer rather
+- **Rebase before gating.** `sapa-gate` first integrates the branch's own remote
+  head (`<remote>/<branch>`, when it exists) so a teammate's pushed commits are
+  not lost to a later force-push, then rebases the branch onto `<remote>/<base>`,
+  so a green gate reflects the state that will actually merge, not a stale base. A
+  conflict at either rebase stops the gate and hands back to the developer rather
   than being auto-resolved. This is distinct from watch's trivial-merge rebase,
   which reacts to the base moving after the PR is open.
 - **Configured checks.** The gate runs the project's configured review, test,
