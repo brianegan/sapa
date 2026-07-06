@@ -131,6 +131,18 @@ me through my existing notification hook, which opens the right window on click.
   discussion to. Config stays agent-interpreted — `sapa config` still just walks
   up and prints the file; the skills read the keys the way they already read
   `base`, so no parser is introduced.
+- **Changed-file contract for `run:` steps.** The gate rebases onto
+  `<remote>/<base>` before it runs, so it already holds the diff against what will
+  merge. It hands that to every `run:` step as `SAPA_BASE` and
+  `SAPA_CHANGED_FILES` (newline-separated paths versus the merge-base). This is
+  the one thing sapa knows and a shell script would reinvent — every script that
+  recomputed the base did so slightly wrong. It lets a monorepo verify script gate
+  only the changed packages and fall back to all on a cross-cutting change, while
+  sapa stays out of package discovery and version-manager handling, which vary too
+  much per repo and are already covered by the `run:` prefix. It stays
+  agent-interpreted: the gate skill exports what it already computed during the
+  rebase, so no new command or parser is introduced. Structured per-package step
+  results are a later refinement, built once changed-package scoping proves out.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
   single invocation carries a stream from its issue through plan, build, gate,
   PR, and watch by invoking each phase skill in turn, with no second command. It
