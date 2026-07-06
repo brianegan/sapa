@@ -42,6 +42,10 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   `sapa worktree` finds `.bare`.
 - `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
+- `sapa watch` — poll the current branch's PR and emit one structured line per
+  real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
+  `merged`, `closed`), guarding empty or failed fetches and deduping against the
+  last poll. The `sapa-watch` skill runs it and reasons about each event.
 - `sapa teardown` — remove a merged stream's worktree and local branch,
   refusing if there are uncommitted changes, then close its VS Code window.
 

@@ -52,6 +52,10 @@ else
   bad "routes to section (Python helper) (rc=$rc, $out)"
 fi
 
+# --- routing: watch reaches its helper (subhelp is a cheap, network-free probe) ---
+out="$("$SAPA" watch --help 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa-watch"; then ok "routes to watch"; else bad "routes to watch (rc=$rc, $out)"; fi
+
 # --- subhelp: `sapa <cmd> --help` shows that command's own help ---
 out="$("$SAPA" config --help 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa-config"; then ok "config --help shows subcommand help"; else bad "config --help shows subcommand help (rc=$rc)"; fi

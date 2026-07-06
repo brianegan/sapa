@@ -51,7 +51,10 @@ run on its own:
 - **Submit** pushes the green branch and opens (or updates) the PR with a written
   description, then reconciles the plan on the issue.
 - **Watch** is the same session monitoring its own PR through a cheap background
-  poller. It fixes CI failures, addresses mechanical review comments, escalates
+  poller. The mechanical half — resolving the PR, polling with back-off, guarding
+  empty/failed fetches, and deduping — is the committed, tested `sapa watch`
+  helper, which emits one structured line per real change; the skill reasons about
+  each event. It fixes CI failures, addresses mechanical review comments, escalates
   subjective ones to me, and auto-rebases a trivially-moved `main` before
   re-running the gate. When the PR merges, it tears the stream down: remove the
   worktree and delete the local branch, so I do not clean up by hand.
@@ -201,7 +204,20 @@ me through my existing notification hook, which opens the right window on click.
   `## Testing` (how it was verified). `Closes #N` sits outside the managed section
   so it survives after a human locks the body.
 - **Watcher wake model.** The background poller checks CI and comments on an
-  interval with back-off and only wakes the session when state changes.
+  interval with back-off and only wakes the session when state changes. The
+  polling itself is the committed `sapa watch` helper: it resolves the PR for the
+  current branch, guards empty or failed fetches so a bad cycle never counts as a
+  change, dedupes against last-seen state, and emits one structured line per real
+  change (`ci-failed`, `new-review`, `new-comment`, `base-behind`, `merged`,
+  `closed`), exiting on the terminal states. The skill runs it via Monitor and
+  decides what each event warrants. This extracts the detection half — mechanical
+  and identical every session — into tested code, leaving only the response half
+  (which the agent must reason about) in the skill, mirroring how `sapa section`
+  owns the comment-ownership logic. (The helper does not read `remote`/`base` from
+  config, unlike the push/rebase subcommands: it resolves the PR by current
+  branch and detects a moved base from `gh`'s `mergeStateStatus`, so config has no
+  mechanical consumer here. The `sapa-watch` skill still reads them for the fixes
+  it pushes and the rebase-and-gate it triggers.)
 - **Comment classification.** The watcher distinguishes mechanical comments (it
   fixes and pushes) from subjective comments (it escalates). The exact boundary
   is an open decision.
@@ -257,11 +273,13 @@ me through my existing notification hook, which opens the right window on click.
   This rule is the most likely to regress silently, so it earns its own test.
 - **Modules tested.** The deterministic helper scripts behind the `sapa`
   subcommands: `sapa config` (walk-up discovery), `sapa section` (the
-  ownership-lock logic for both PR body and issue plan), `sapa start`
+  ownership-lock logic for both PR body and issue plan), `sapa watch` (the poll
+  emitter: the empty/failed-fetch guard, dedup against last-seen state, each event
+  type, and terminal-state exit, with `gh` stubbed on PATH), `sapa start`
   (issue-to-branch-name derivation), `sapa teardown` (clean-guarded worktree
   removal), and `sapa bootstrap` (the `init` path builds the `.bare` + `main`
   layout offline), plus the `sapa` dispatcher itself (routing, help, unknown
-  commands). The `gh`-driven and agent-driven parts (opening the PR, fixing CI,
+  commands). The remaining agent-driven parts (opening the PR, fixing CI,
   classifying comments) are verified by observation, not unit tests, as is
   `sapa worktree` (it fetches `origin` and opens an editor).
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded

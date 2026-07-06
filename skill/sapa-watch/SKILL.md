@@ -21,30 +21,39 @@ to get its number and state.
 
 ## The watch loop
 
-Poll cheaply. Run the status check as a background process on an interval with
-back-off, and only wake to act when something actually changed, so the session
-is not burning tokens while it waits. On each change:
+Do not reimplement the poll loop. `sapa watch` owns the mechanical half —
+resolving the PR, polling with back-off, guarding empty or failed fetches, and
+deduping — so the detection is written once and tested, not improvised each
+session. Run it as a background process through Monitor and only wake to act when
+it emits a line. Each line is one real change: the first tab-separated token is
+the event type.
 
-- **CI is failing** (`gh pr checks <N>`): read the failing job, fix the
-  cause in the working tree, commit, and push. Re-check.
-- **A new review comment** (`gh pr view <N> --comments`):
+- `ci-failed	<checks>` — CI is failing. Read the failing job (`gh pr checks
+  <N>`), fix the cause in the working tree, commit, and push.
+- `new-review	<id> <author> <state>` / `new-comment	<id> <author>` — a review
+  or comment landed. Read it (`gh pr view <N> --comments`) and decide:
   - Mechanical (rename, typo, obvious small fix): make the change, push, and
     reply that it is done.
   - Subjective or a judgement call: do not guess. Escalate to the user through
     the notification hook so clicking it opens this window, and wait.
-  - If a comment changes the approach, refresh the plan comment on the issue by
-    running `/sapa-plan` step 4's flow in full: find the `sapa:plan` comment,
-    read its body untruncated with `gh api .../issues/comments/<id> --jq .body`,
-    apply the same truncation guard (a `<!-- sapa:plan hash=… -->` or
+  - If it changes the approach, refresh the plan comment on the issue by running
+    `/sapa-plan` step 4's flow in full: find the `sapa:plan` comment, read its
+    body untruncated with `gh api .../issues/comments/<id> --jq .body`, apply the
+    same truncation guard (a `<!-- sapa:plan hash=… -->` or
     `<!-- sapa:plan locked -->` wrapper line with no matching `<!-- /sapa:plan -->`
     close → stop, do not patch; a marker quoted inline in prose does not count),
-    then run it through `sapa section plan`
-    and patch it in place. If that comment is locked or edited, leave it. Never
-    touch the issue body.
-- **The base branch has moved** and branch protection needs the branch up to
-  date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it rebases
-  onto `<remote>/<base>` and re-runs the checks), then push. If it is not
+    then run it through `sapa section plan` and patch it in place. If that comment
+    is locked or edited, leave it. Never touch the issue body.
+- `base-behind` — the base branch moved and branch protection needs the branch
+  up to date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it
+  rebases onto `<remote>/<base>` and re-runs the checks), then push. If it is not
   trivial, escalate.
+- `merged` / `closed` — terminal. `sapa watch` emits this and exits; on `merged`,
+  tear the stream down (below).
+
+After you push a fix, `sapa watch` keeps running and will emit the next real
+change; you do not restart it. It dedupes against what it has already seen, so
+acting on an event will not make it fire again.
 
 If the PR was opened as a draft, the user may promote it to ready whenever they
 choose; keep watching across that transition. (When it shipped ready there is

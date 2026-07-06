@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""sapa-watch — the mechanical half of watching a stream's PR.
+
+Watching a PR is two jobs. Detecting what changed is mechanical and identical
+every time; deciding what to do about it is not. This helper owns only the
+mechanical half: it polls the PR for the current branch and emits one structured
+line per real change. The `sapa-watch` skill runs it (via the agent's Monitor)
+and reasons about each emitted event.
+
+This mirrors the `sapa section` precedent — the fiddly, must-be-right logic lives
+in one tested helper the skills call, instead of each session re-improvising it.
+The bug that motivated this: an improvised loop treated an empty-but-successful
+`gh` response as a state change and emitted a spurious event. Here an empty or
+failed fetch is guarded and never counts as a change.
+
+Events (one per line, tab-separated; the first token is the type):
+
+    ci-failed    <comma-joined failing check names>
+    new-review   <id>  <author>  <state>
+    new-comment  <id>  <author>
+    base-behind
+    merged
+    closed
+
+`new-review` / `new-comment` are the set difference of the current ids against
+the last-seen ids (dedup). `ci-failed` and `base-behind` are edge-triggered:
+emitted when the PR transitions into that state, not on every poll while it
+holds. `merged` / `closed` are terminal: emitted once, then the loop stops.
+
+Last-seen state is persisted to a state file (default: `<git-dir>/sapa-watch.json`)
+so a resumed session dedups against what a prior session already saw, rather than
+replaying every existing comment. The very first poll with no state file has an
+empty baseline, so it surfaces the PR's current actionable state (useful when
+attaching to a PR that already has failing CI or unaddressed comments).
+
+Usage:
+    sapa-watch                 # poll with back-off, emit changes, exit on merged/closed
+    sapa-watch --once          # a single poll: diff against the state file, print, exit
+    sapa-watch --state-file P  # use P for last-seen state (default: <git-dir>/sapa-watch.json)
+    sapa-watch --start DIR     # locate the git dir for the state file from DIR (default: $PWD)
+
+Loop tuning via env (seconds): SAPA_WATCH_INTERVAL (base, default 30),
+SAPA_WATCH_MAX_INTERVAL (cap, default 300), SAPA_WATCH_BACKOFF (factor, default 2).
+A poll that yields no change backs the interval off toward the cap; a poll that
+yields a change resets it to the base.
+
+`gh` is assumed installed and authenticated, as everywhere else in sapa.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+
+# gh's statusCheckRollup mixes two shapes: check runs carry a `conclusion`,
+# legacy status contexts carry a `state`. Either of these values means failed.
+FAILING_CONCLUSIONS = {"FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+FAILING_STATES = {"FAILURE", "ERROR"}
+
+# Only the fields diff() actually reads. `state` doubles as the fetch sanity
+# check: a response without it is not a usable PR view, so fetch_pr skips it.
+PR_JSON_FIELDS = "state,mergeStateStatus,statusCheckRollup,reviews,comments"
+
+
+def default_state_file(start: str) -> str:
+    """`<git-dir>/sapa-watch.json` so a resumed session dedups against prior polls."""
+    try:
+        git_dir = subprocess.run(
+            ["git", "-C", start, "rev-parse", "--absolute-git-dir"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        git_dir = start
+    return os.path.join(git_dir, "sapa-watch.json")
+
+
+def load_state(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    return {
+        "reviews": list(data.get("reviews", [])),
+        "comments": list(data.get("comments", [])),
+        "ci_failing": bool(data.get("ci_failing", False)),
+        "behind": bool(data.get("behind", False)),
+    }
+
+
+def save_state(path: str, state: dict) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    os.replace(tmp, path)
+
+
+def fetch_pr() -> dict | None:
+    """Return the parsed PR JSON, or None on a failed/empty/unusable fetch.
+
+    None is the guard the whole helper hangs on: a cycle that can't get a clean
+    read is skipped, never mistaken for a state change (the #42 bug). A parseable
+    response with no `state` (e.g. an empty `{}`) is not a usable PR view either,
+    so it is treated the same way rather than clobbering the baseline.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", "--json", PR_JSON_FIELDS],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        pr = json.loads(out)
+    except ValueError:
+        return None
+    if not isinstance(pr, dict) or not pr.get("state"):
+        return None
+    return pr
+
+
+def failing_checks(rollup: list | None) -> list:
+    names = []
+    for c in rollup or []:
+        conclusion = (c.get("conclusion") or "").upper()
+        state = (c.get("state") or "").upper()
+        if conclusion in FAILING_CONCLUSIONS or state in FAILING_STATES:
+            names.append(c.get("name") or c.get("context") or "check")
+    return names
+
+
+def author_of(node: dict) -> str:
+    return (node.get("author") or {}).get("login") or "?"
+
+
+def diff(pr: dict, prior: dict) -> tuple:
+    """Compare the fetched PR against the prior state.
+
+    Returns (events, new_state, terminal). `terminal` is set on merged/closed,
+    which the caller uses to stop the loop.
+    """
+    state = (pr.get("state") or "").upper()
+
+    if state == "MERGED":
+        return [("merged",)], None, True
+    if state == "CLOSED":
+        return [("closed",)], None, True
+
+    review_ids = [str(r.get("id")) for r in (pr.get("reviews") or []) if r.get("id") is not None]
+    comment_ids = [str(c.get("id")) for c in (pr.get("comments") or []) if c.get("id") is not None]
+    failing = failing_checks(pr.get("statusCheckRollup"))
+    ci_failing = bool(failing)
+    behind = (pr.get("mergeStateStatus") or "").upper() == "BEHIND"
+
+    seen_reviews = set(prior["reviews"])
+    seen_comments = set(prior["comments"])
+
+    events = []
+    if ci_failing and not prior["ci_failing"]:
+        events.append(("ci-failed", ",".join(failing)))
+    if behind and not prior["behind"]:
+        events.append(("base-behind",))
+    for r in pr.get("reviews") or []:
+        rid = str(r.get("id"))
+        if r.get("id") is not None and rid not in seen_reviews:
+            events.append(("new-review", rid, author_of(r), (r.get("state") or "").upper()))
+    for c in pr.get("comments") or []:
+        cid = str(c.get("id"))
+        if c.get("id") is not None and cid not in seen_comments:
+            events.append(("new-comment", cid, author_of(c)))
+
+    new_state = {
+        "reviews": review_ids,
+        "comments": comment_ids,
+        "ci_failing": ci_failing,
+        "behind": behind,
+    }
+    return events, new_state, False
+
+
+def emit(events: list) -> None:
+    for e in events:
+        sys.stdout.write("\t".join(e) + "\n")
+    sys.stdout.flush()
+
+
+def poll_once(state_file: str) -> tuple:
+    """One poll. Returns (terminal, changed).
+
+    A skipped cycle (failed/empty fetch) emits nothing and leaves the state file
+    untouched, so the next good poll still sees the same baseline.
+    """
+    pr = fetch_pr()
+    if pr is None:
+        sys.stderr.write("sapa-watch: skipped poll (empty or failed fetch)\n")
+        return False, False  # (terminal, changed)
+    prior = load_state(state_file)
+    events, new_state, terminal = diff(pr, prior)
+    emit(events)
+    if not terminal:
+        save_state(state_file, new_state)
+    return terminal, bool(events)
+
+
+def watch_loop(state_file: str) -> int:
+    base = float(os.environ.get("SAPA_WATCH_INTERVAL", "30"))
+    cap = float(os.environ.get("SAPA_WATCH_MAX_INTERVAL", "300"))
+    factor = float(os.environ.get("SAPA_WATCH_BACKOFF", "2"))
+    interval = base
+    while True:
+        terminal, changed = poll_once(state_file)
+        if terminal:
+            return 0
+        interval = base if changed else min(cap, max(base, interval) * factor)
+        if interval > 0:
+            time.sleep(interval)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        add_help=True,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--once", action="store_true", help="single poll, then exit")
+    parser.add_argument("--state-file")
+    parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
+    args = parser.parse_args()
+
+    state_file = args.state_file or default_state_file(args.start)
+
+    if args.once:
+        poll_once(state_file)
+        return 0
+
+    sys.stderr.write("sapa-watch: watching PR for the current branch\n")
+    return watch_loop(state_file)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
