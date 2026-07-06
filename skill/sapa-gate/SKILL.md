@@ -33,19 +33,35 @@ Each gate step has a `name` and either:
 - `skill:` — a skill to invoke for that step (for example a review skill). Treat
   its findings as the step result.
 
-## Step 2 — Rebase onto the base
+## Step 2 — Rebase the branch up to date
 
-Bring the branch up to date with the base so the gate runs against what will
-merge.
+Bring the branch up to date so the gate runs against what will merge: first
+integrate any work a teammate pushed to this same branch, then rebase onto the
+base.
 
 1. Commit any uncommitted work with a clear message first, so the tree is clean
    for the rebase.
-2. `git fetch <remote>`, then `git rebase <remote>/<base>` using `remote` and
-   `base` from the config.
-3. Already up to date → no-op, continue.
-4. **Conflict → stop.** Run `git rebase --abort`, report the conflict as a
-   finding, and let the user resolve it before rerunning `/sapa-gate`. Never
-   auto-resolve a rebase conflict — it is a judgement call.
+2. `git fetch <remote>` using `remote` from the config.
+3. **Integrate the branch's own remote head.** A teammate may have pushed to this
+   branch while you worked; a later `/sapa-submit` force-push would discard those
+   commits. Take the current branch name with `git branch --show-current`. If it
+   is empty (detached HEAD) stop and report rather than guessing a branch. If
+   `<remote>/<branch>` exists (`git rev-parse --verify --quiet <remote>/<branch>`
+   succeeds), rebase onto it — `git rebase <remote>/<branch>` — so the teammate's
+   commits land underneath your local work rather than being lost. If the remote
+   branch does not exist yet (never pushed), skip this rebase.
+4. **Rebase onto the base.** `git rebase <remote>/<base>` using `base` from the
+   config.
+
+At each rebase: already up to date → no-op, continue. **On a conflict, resolve
+what is unambiguous and escalate the rest.** Inspect the conflict. When the
+correct resolution is clear and does not change how anything works — for example
+each side added a separate entry, or the two edits overlap textually but are
+independent — resolve it, `git add` the files, and `git rebase --continue`. When
+the resolution is a judgement call or could change behaviour, do not guess: leave
+the rebase stopped at that conflict, report the conflicting hunk as a finding, and
+escalate to the user. Resolve it their way, then `git rebase --continue`; do not
+certify green until the rebase completes cleanly.
 
 Once the rebase settles, the branch's changed files against the merge-base are
 `git diff --name-only <remote>/<base>...HEAD` — the diff the gate holds. Step 3
