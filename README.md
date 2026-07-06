@@ -125,6 +125,64 @@ The gate is the only thing that checks the work — nothing downstream re-verifi
 it — so make the `gate:` steps count: include a real test, analyze, and review
 step, not a token check.
 
+### Changed-package scoping in a monorepo
+
+`sapa-gate` rebases onto the base before it runs, so it already holds the diff
+against what will merge. It hands that to every `run:` step as two environment
+variables:
+
+- `SAPA_BASE` — the branch the PR targets (the config `base`).
+- `SAPA_CHANGED_FILES` — the files this branch changed versus the merge-base,
+  newline-separated.
+
+That is the whole contract. Sapa does not discover packages or own your version
+manager — those vary too much per repo, and the `run:` prefix (`fvm dart …`)
+already covers the toolchain. Your script maps the changed files to packages and
+decides what to gate. In a workspace with many packages, gate only the ones the
+branch touched, and fall back to gating everything when the change is
+cross-cutting (root `pubspec.yaml`, CI config, shared tooling):
+
+```sh
+#!/usr/bin/env bash
+# .sapa-verify.sh <format|analyze|test> — gate only changed packages.
+set -euo pipefail
+cmd="${1:?usage: .sapa-verify.sh <format|analyze|test>}"
+
+# All workspace package dirs (one awk line; adjust to your layout). Strip only
+# the leading list marker, and use a portable space class so BSD awk matches.
+all_pkgs() { awk '/^[[:space:]]*-/{sub(/^[[:space:]]*-[[:space:]]*/,"");print}' pubspec.yaml; }
+
+# A cross-cutting change means gate everything.
+cross_cutting() {
+  grep -qE '^(pubspec\.(yaml|lock)|\.github/)' <<<"$SAPA_CHANGED_FILES"
+}
+
+if [ -z "${SAPA_CHANGED_FILES:-}" ] || cross_cutting; then
+  pkgs=$(all_pkgs)
+else
+  # Keep each package that owns at least one changed file.
+  pkgs=$(all_pkgs | while IFS= read -r p; do
+           if grep -qE "^${p}/" <<<"$SAPA_CHANGED_FILES"; then echo "$p"; fi
+         done)
+fi
+
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  echo ">> $cmd $p"
+  (cd "$p" && fvm dart "$cmd" .)
+done <<<"$pkgs"
+```
+
+```yaml
+gate:
+  - name: format
+    run: ./.sapa-verify.sh format
+  - name: analyze
+    run: ./.sapa-verify.sh analyze
+  - name: test
+    run: ./.sapa-verify.sh test
+```
+
 ## Test
 
 ```sh

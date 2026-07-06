@@ -47,9 +47,32 @@ merge.
    finding, and let the user resolve it before rerunning `/sapa-gate`. Never
    auto-resolve a rebase conflict — it is a judgement call.
 
+Once the rebase settles, the branch's changed files against the merge-base are
+`git diff --name-only <remote>/<base>...HEAD` — the diff the gate holds. Step 3
+hands this to each `run:` step so a script can scope to it.
+
 ## Step 3 — Run the gate (blocking)
 
 Run each gate step in order, in the working tree. This blocks.
+
+Give every `run:` step the diff as two environment variables, `SAPA_BASE` and
+`SAPA_CHANGED_FILES` (newline-separated paths), so a script can gate only the
+changed packages and fall back to all on a cross-cutting change. Set them on the
+command itself — each step runs as its own shell, so a variable exported in an
+earlier step would not survive; setting them inline keeps each step
+self-contained:
+
+```
+SAPA_BASE=<base> \
+SAPA_CHANGED_FILES="$(git diff --name-only <remote>/<base>...HEAD)" \
+  <the run: command>
+```
+
+Use `<base>` and `<remote>` from the config; the triple-dot diffs against the
+merge-base. Quote the substitution so the newline-separated paths survive. An
+empty result (the branch matches the base) is fine — the variables come through
+empty. This contract applies to `run:` steps only; a `skill:` step invokes a
+skill rather than a shell, so the variables do not apply to it.
 
 - All steps pass → report the branch is green and stop. `/sapa-submit` ships it
   next.
