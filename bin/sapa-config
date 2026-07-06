@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
     -p|--print) print_contents=true ;;
     --start) shift; start="$1" ;;
     -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "sapa-config: unknown argument: $1" >&2; exit 2 ;;

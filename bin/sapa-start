@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
     --title) shift; title="${1:-}"; title_set=true ;;
     --print) print_only=true ;;
     --start) shift; start="${1:-}" ;;
-    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "sapa-start: unknown flag: $1" >&2; exit 2 ;;
     *)
       if [ -z "$issue" ]; then issue="$1"; else start="$1"; fi
@@ -70,9 +70,12 @@ if $print_only; then
   exit 0
 fi
 
-# Hand off to sapa-worktree, which creates the tree and opens your editor.
+# Hand off to sapa-worktree, which creates the tree and opens your editor. Call
+# it by sibling path, not via PATH: only the `sapa` dispatcher is on PATH, and it
+# execs this script from the clone's bin/, so its sibling is right here.
+worktree="$(dirname "$0")/sapa-worktree"
 if [ -n "$start" ]; then
-  exec sapa-worktree "$branch" "$start"
+  exec "$worktree" "$branch" "$start"
 else
-  exec sapa-worktree "$branch"
+  exec "$worktree" "$branch"
 fi

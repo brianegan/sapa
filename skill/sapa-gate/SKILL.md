@@ -16,8 +16,8 @@ name is configurable but there is never a second one; GitHub goes through `gh`.
 
 ## Step 1 — Locate the config
 
-Run `sapa-config -p` to print the discovered `.sapa.yaml` (it walks up from the
-current directory the way `sapa-worktree` finds `.bare`). If none is found, ask
+Run `sapa config -p` to print the discovered `.sapa.yaml` (it walks up from the
+current directory the way `sapa worktree` finds `.bare`). If none is found, ask
 whether to use a sensible default gate (test + format) or stop.
 
 Read these top-level keys (all optional):

@@ -5,8 +5,8 @@ Generated via `/to-prd` from the design conversation.
 
 ## Problem Statement
 
-I get into a piece of work cleanly with sapa's own tooling (`sapa-bootstrap` to
-clone or init a bare repo, `sapa-worktree` to spin up a worktree per stream), but
+I get into a piece of work cleanly with sapa's own tooling (`sapa bootstrap` to
+clone or init a bare repo, `sapa worktree` to spin up a worktree per stream), but
 nothing gets me out of one. After the code is written, everything is manual: I run quality
 checks by hand, hand-fix PR descriptions, feed CI failures back to the agent one
 at a time, and integrate a moved `main` myself. I do this across three to five
@@ -113,11 +113,11 @@ me through my existing notification hook, which opens the right window on click.
 - **GitHub interface.** All GitHub operations go through `gh`. An earlier version
   used `gh-axi` (`npx -y gh-axi`) for its token-efficient TOON output, but that
   output truncates long field values at ~2000 chars in every mode, which corrupts
-  any reconcile that reads a comment or PR body back to re-apply a `sapa-section`
+  any reconcile that reads a comment or PR body back to re-apply a `sapa section`
   managed section. Faithful reads matter more here than token thrift, and `gh`
   covers every command sapa uses.
 - **Config discovery.** The tool finds its config by walking up from the current
-  directory until it finds a config file, the same pattern `sapa-worktree` uses
+  directory until it finds a config file, the same pattern `sapa worktree` uses
   to locate `.bare`.
 - **Config expressiveness.** A gate step can be either a shell command or a
   skill invocation (for example, the wingspan review skill as the review step),
@@ -128,7 +128,7 @@ me through my existing notification hook, which opens the right window on click.
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
   `draft`), and `plan:` names a skill `/sapa-plan` delegates the planning
-  discussion to. Config stays agent-interpreted — `sapa-config` still just walks
+  discussion to. Config stays agent-interpreted — `sapa config` still just walks
   up and prints the file; the skills read the keys the way they already read
   `base`, so no parser is introduced.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
@@ -226,13 +226,15 @@ me through my existing notification hook, which opens the right window on click.
 - **Secondary seam.** An isolated test of the PR-description ownership lock:
   given a description marked human-owned, a subsequent run must not modify it.
   This rule is the most likely to regress silently, so it earns its own test.
-- **Modules tested.** The deterministic helper scripts: `sapa-config`
-  (walk-up discovery), `sapa-section` (the ownership-lock logic for both PR body
-  and issue plan), `sapa-start` (issue-to-branch-name derivation), `sapa-teardown`
-  (clean-guarded worktree removal), and `sapa-bootstrap` (the `init` path builds
-  the `.bare` + `main` layout offline). The `gh`-driven and agent-driven parts
-  (opening the PR, fixing CI, classifying comments) are verified by observation,
-  not unit tests, as is `sapa-worktree` (it fetches `origin` and opens an editor).
+- **Modules tested.** The deterministic helper scripts behind the `sapa`
+  subcommands: `sapa config` (walk-up discovery), `sapa section` (the
+  ownership-lock logic for both PR body and issue plan), `sapa start`
+  (issue-to-branch-name derivation), `sapa teardown` (clean-guarded worktree
+  removal), and `sapa bootstrap` (the `init` path builds the `.bare` + `main`
+  layout offline), plus the `sapa` dispatcher itself (routing, help, unknown
+  commands). The `gh`-driven and agent-driven parts (opening the PR, fixing CI,
+  classifying comments) are verified by observation, not unit tests, as is
+  `sapa worktree` (it fetches `origin` and opens an editor).
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
   end-to-end fixtures drive the pipeline against fixture repos with recorded
   agent interactions. Imitate that fixture-driven, command-surface approach.
@@ -252,7 +254,7 @@ me through my existing notification hook, which opens the right window on click.
 - The design deliberately splits `no-mistakes`' single background pipeline into a
   foreground gate and a background watch, because putting the gate in the
   background was the root of the "separation" and lost-sync pain.
-- The tool bundles the `sapa-bootstrap` and `sapa-worktree` scripts that get you
+- The tool bundles the `sapa bootstrap` and `sapa worktree` commands that get you
   into a stream, so a fresh clone carries the whole workflow — from setting up a
   worktree to a merged PR — rather than depending on tooling that lives only on
   one machine.

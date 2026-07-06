@@ -1,18 +1,22 @@
 #!/bin/bash
-# sapa-install — link sapa's helpers onto PATH and its skills into your agents.
+# sapa-install — link the sapa command onto PATH and its skills into your agents.
 #
-# Symlinks the bin/ helpers into a PATH directory and the skill/ directories
+# Symlinks the `sapa` dispatcher into a PATH directory and the skill/ directories
 # into every coding agent that's installed (Claude Code, Codex — both read the
-# same SKILL.md format). Links point into the clone you run this from, so a plain
-# clone-and-run works; a sapa developer runs it from their `main` checkout so the
-# links track merged code. Re-running is safe (idempotent).
+# same SKILL.md format). The other bin/sapa-* helpers are never linked: `sapa`
+# resolves back to the clone and calls them by path. Links point into the clone
+# you run this from, so a plain clone-and-run works; a sapa developer runs it from
+# their `main` checkout so the links track merged code. Re-running is safe
+# (idempotent), and it sweeps any links left by the old one-per-command layout.
 #
 # Usage:
-#   sapa-install              # link helpers and skills
-#   sapa-install uninstall    # remove the symlinks sapa created
+#   sapa install              # link sapa and skills
+#   sapa install uninstall    # remove the symlinks sapa created
+#
+# (Run it as `bin/sapa install` from a fresh clone, before sapa is on PATH.)
 #
 # Environment:
-#   SAPA_BIN_DIR   where helpers are linked (default ~/.local/bin).
+#   SAPA_BIN_DIR   where sapa is linked (default ~/.local/bin).
 #   SAPA_AGENTS    space/comma-separated agents to target (e.g. "claude codex").
 #                  When unset, every agent whose ~/.<agent> directory exists is
 #                  targeted.
@@ -20,7 +24,7 @@
 set -euo pipefail
 
 case "${1:-}" in
-  -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 mode="install"
@@ -28,21 +32,24 @@ case "${1:-}" in
   "") ;;
   uninstall) mode="uninstall" ;;
   *) echo "sapa-install: unknown argument: $1" >&2
-     echo "usage: sapa-install [uninstall]" >&2
+     echo "usage: sapa install [uninstall]" >&2
      exit 2 ;;
 esac
 
-# The helpers that go on PATH (including this script, so uninstall stays
-# reachable) and the skills that go into each agent's skills directory.
-BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
+# What goes on PATH: just the `sapa` dispatcher. LEGACY_BINS is the old
+# one-per-command layout — never linked anymore, but swept on both install and
+# uninstall so upgrading from that layout leaves nothing stale behind. SKILLS go
+# into each agent's skills directory.
+BINS="sapa"
+LEGACY_BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
 SKILLS="sapa-plan sapa-build sapa-gate sapa-submit sapa-watch sapa-flow"
 
 # Source is the clone this script lives in: bin/sapa-install -> repo root.
 # Resolve $0 through its symlink chain first, so re-running the linked copy on
-# PATH (e.g. ~/.local/bin/sapa-install) still installs from the original clone
-# rather than treating the PATH dir as the source. A portable readlink loop —
-# readlink -f is not reliable on macOS's BSD tools — handling absolute and
-# relative link targets.
+# PATH (e.g. ~/.local/bin/sapa) still installs from the original clone rather
+# than treating the PATH dir as the source. A portable readlink loop — readlink
+# -f is not reliable on macOS's BSD tools — handling absolute and relative link
+# targets.
 self="$0"
 hops=0
 while [ -L "$self" ]; do
@@ -72,12 +79,36 @@ else
   done
 fi
 
+# remove_link removes an entry only when it is a symlink whose target looks like
+# one of ours (matches the given glob), so a regular file or a link pointing
+# elsewhere is never touched. Shared by the install-time legacy sweep and by
+# uninstall.
+removed=0
+skipped=0
+remove_link() {
+  # $1 = path to the link, $2 = glob the target must match to be ours.
+  local link="$1" want="$2"
+  [ -L "$link" ] || return 0
+  local target; target="$(readlink "$link")"
+  case "$target" in
+    $want) rm -f "$link"; removed=$((removed+1)) ;;
+    *) skipped=$((skipped+1)) ;;
+  esac
+}
+
 if [ "$mode" = "install" ]; then
   mkdir -p "$bin_dir"
   for h in $BINS; do
     ln -sfn "$SRC/bin/$h" "$bin_dir/$h"
   done
-  echo "sapa-install: linked $(echo $BINS | wc -w | tr -d ' ') helpers into $bin_dir"
+  echo "sapa-install: linked sapa into $bin_dir"
+
+  # Sweep leftover links from the old one-per-command layout so an upgrade in
+  # place doesn't leave stale sapa-* commands on PATH.
+  for h in $LEGACY_BINS; do
+    remove_link "$bin_dir/$h" "*/bin/$h"
+  done
+  [ "$removed" -gt 0 ] && echo "sapa-install: removed $removed legacy sapa-* link(s) from $bin_dir"
 
   if [ -n "${agents// }" ]; then
     linked=""
@@ -94,7 +125,7 @@ if [ "$mode" = "install" ]; then
     echo "sapa-install: no coding agents detected (~/.claude, ~/.codex); set SAPA_AGENTS to link skills anyway"
   fi
 
-  # A PATH hint, not a failure — the helpers are linked either way.
+  # A PATH hint, not a failure — sapa is linked either way.
   case ":$PATH:" in
     *":$bin_dir:"*) ;;
     *) echo "sapa-install: note: $bin_dir is not on your PATH; add it, e.g. export PATH=\"$bin_dir:\$PATH\"" ;;
@@ -102,24 +133,9 @@ if [ "$mode" = "install" ]; then
   exit 0
 fi
 
-# uninstall: remove an entry only when it is a symlink whose target looks like
-# one of ours (ends in /bin/<name> or /skill/<name>), so a regular file or a link
-# pointing elsewhere is never touched.
-removed=0
-skipped=0
-
-remove_link() {
-  # $1 = path to the link, $2 = glob the target must match to be ours.
-  local link="$1" want="$2"
-  [ -L "$link" ] || return 0
-  local target; target="$(readlink "$link")"
-  case "$target" in
-    $want) rm -f "$link"; removed=$((removed+1)) ;;
-    *) skipped=$((skipped+1)) ;;
-  esac
-}
-
-for h in $BINS; do
+# uninstall: remove the sapa link, any leftover legacy links, and the skill
+# links — each only when it is a symlink pointing into sapa.
+for h in $BINS $LEGACY_BINS; do
   remove_link "$bin_dir/$h" "*/bin/$h"
 done
 for a in $agents; do
