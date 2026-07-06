@@ -3,6 +3,17 @@
 Sapa (Filipino for "stream") gates, ships, and watches a piece of work.
 Generated via `/to-prd` from the design conversation.
 
+## Status of this document
+
+This PRD is a living record of the current status: the decisions made so far and
+the use cases we set out to support. It is a reference, not a contract, and it is
+never a blocker. A decision written here reflects what we knew at the time, not a
+commitment we owe the past. When a new request contradicts something recorded
+here, the new request wins. Raise the earlier decision as a gut check so we make
+the change deliberately, then update this document to match. The point of the
+software is to be used and adapted as we learn from using it, so this document
+follows the code rather than fencing it in.
+
 ## Problem Statement
 
 I get into a piece of work cleanly with sapa's own tooling (`sapa bootstrap` to
