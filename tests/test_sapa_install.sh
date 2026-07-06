@@ -37,6 +37,17 @@ if readlink "$home/.claude/skills/sapa-plan" | grep -q '/skill/sapa-plan$'; then
 out="$(HOME="$home" bash "$INSTALL" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ -L "$bin_dir/sapa-config" ]; then ok "re-install is idempotent"; else bad "re-install is idempotent (rc=$rc, $out)"; fi
 
+# --- re-running the LINKED copy on PATH installs from the original clone ---
+# Regression: invoking $bin_dir/sapa-install (a symlink into the clone) must
+# resolve back to the clone, not treat $bin_dir/.. as the source and link the
+# helpers to themselves. The self-referential target ($bin_dir/<h>) also ends in
+# /bin/<h>, so assert the exact clone path — not just the suffix.
+clone="$(cd "$HERE/.." && pwd)"
+out="$(HOME="$home" bash "$bin_dir/sapa-install" 2>&1)"; rc=$?
+if [ $rc -eq 0 ]; then ok "re-install via linked copy exits 0"; else bad "re-install via linked copy exits 0 (rc=$rc, $out)"; fi
+if [ "$(readlink "$bin_dir/sapa-config")" = "$clone/bin/sapa-config" ]; then ok "linked-copy re-install keeps helper target in the clone"; else bad "linked-copy re-install keeps helper target in the clone ($(readlink "$bin_dir/sapa-config"))"; fi
+if [ "$(readlink "$bin_dir/sapa-install")" = "$clone/bin/sapa-install" ]; then ok "linked-copy re-install does not self-reference"; else bad "linked-copy re-install does not self-reference ($(readlink "$bin_dir/sapa-install"))"; fi
+
 # --- SAPA_AGENTS overrides detection: only claude linked ---
 home2="$root/home2"
 mkdir -p "$home2/.claude" "$home2/.codex"

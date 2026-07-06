@@ -38,7 +38,26 @@ BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-tear
 SKILLS="sapa-plan sapa-build sapa-gate sapa-submit sapa-watch sapa-flow"
 
 # Source is the clone this script lives in: bin/sapa-install -> repo root.
-SRC="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve $0 through its symlink chain first, so re-running the linked copy on
+# PATH (e.g. ~/.local/bin/sapa-install) still installs from the original clone
+# rather than treating the PATH dir as the source. A portable readlink loop —
+# readlink -f is not reliable on macOS's BSD tools — handling absolute and
+# relative link targets.
+self="$0"
+hops=0
+while [ -L "$self" ]; do
+  hops=$((hops+1))
+  if [ "$hops" -gt 40 ]; then
+    echo "sapa-install: too many symlink hops resolving $0 (cycle?)" >&2
+    exit 1
+  fi
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *)  self="$(dirname "$self")/$link" ;;
+  esac
+done
+SRC="$(cd "$(dirname "$self")/.." && pwd)"
 
 bin_dir="${SAPA_BIN_DIR:-$HOME/.local/bin}"
 
