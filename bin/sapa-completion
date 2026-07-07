@@ -84,10 +84,30 @@ $pairs
     _describe -t commands 'sapa command' _sapa_cmds
     return
   fi
+  # Argument completion, one branch per subcommand so Tab always offers something
+  # useful past the command word instead of falling through to silence.
   case "\${words[2]}" in
+    bootstrap)  _alternative 'modes:mode:((init\:"start a fresh local repo"))' 'repo:repository url: ' ;;
+    worktree)   _arguments ':branch name: ' '::start-point:__sapa_git_refs' ;;
+    start)      _arguments '--title[skip the gh lookup]:title: ' '--print[print the branch, do not run sapa worktree]' '--start[start point]:start-point:__sapa_git_refs' ':issue number: ' '::start-point:__sapa_git_refs' ;;
+    config)     _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/' ;;
+    section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
+    watch)      _arguments '--once[single poll, then exit]' '--state-file[last-seen state file]:file:_files' '--start[locate the git dir from here]:directory:_files -/' ;;
+    teardown)   _arguments '--force[remove even with uncommitted changes]' '::worktree:_files -/' ;;
     install)    _values 'install action' 'uninstall' ;;
     completion) _values 'shell' 'zsh' ;;
   esac
 }
+# Complete git refs (branches, tags) for start-points, when we're in a git repo.
+__sapa_git_refs() {
+  local -a refs
+  refs=(\${(f)"\$(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"})
+  (( \${#refs} )) && _describe -t refs 'git ref' refs
+}
+# Wire it up. compdef only exists once compinit has run; if the enable line sits
+# before compinit in ~/.zshrc, initialise completion here so it attaches anyway.
+if (( ! \$+functions[compdef] )); then
+  autoload -Uz compinit && compinit
+fi
 compdef _sapa sapa
 EOF
