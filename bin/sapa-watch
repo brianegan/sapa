@@ -16,14 +16,25 @@ failed fetch is guarded and never counts as a change.
 Events (one per line, tab-separated; the first token is the type):
 
     ci-failed    <comma-joined failing check names>
-    new-review   <id>  <author>  <state>
-    new-comment  <id>  <author>
+    new-review   <id>  <author>  <state>  <self|other>
+    new-comment  <id>  <author>  <self|other>
     base-behind
     merged
     closed
 
+`new-review` / `new-comment` carry a trailing `self`/`other` marker: `self` when
+the author is the authenticated gh user (the stream's own developer), `other`
+when it is anyone else. The skill routes on it — a `self` comment is answered in
+the coding-agent chat, never on GitHub; an `other` comment is answered on GitHub.
+If the viewer login can't be resolved, the marker fails safe to `self` so an
+unknown viewer never triggers a public reply to the developer's own comment.
+
 `new-review` / `new-comment` are the set difference of the current ids against
-the last-seen ids (dedup). `ci-failed` and `base-behind` are edge-triggered:
+the last-seen ids (dedup). A review still in `PENDING` state is skipped entirely
+— not emitted and not recorded as seen — because it is the author's own
+unsubmitted draft that keeps its id when submitted; recording it while pending
+would dedup away the submitted review and strand it as pending. `ci-failed` and
+`base-behind` are edge-triggered:
 emitted when the PR transitions into that state, not on every poll while it
 holds. `merged` / `closed` are terminal: emitted once, then the loop stops.
 
@@ -142,11 +153,52 @@ def author_of(node: dict) -> str:
     return (node.get("author") or {}).get("login") or "?"
 
 
-def diff(pr: dict, prior: dict) -> tuple:
+_viewer_login: str | None = None
+
+
+def viewer_login() -> str | None:
+    """The authenticated gh login, resolved once and cached after the first success.
+
+    Returns None when it can't be determined (gh unavailable, unauthenticated,
+    or an empty response). Callers treat None as "unknown" and fail safe. Only a
+    successful resolution is cached; a failed one is retried on the next call
+    rather than pinned, so a transient `gh` blip during the long-running watch
+    loop does not lock the whole session into fail-safe mode (the loop's PR fetch
+    recovers per poll the same way).
+    """
+    global _viewer_login
+    if _viewer_login is not None:
+        return _viewer_login
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError:
+        return None
+    if proc.returncode == 0:
+        _viewer_login = (proc.stdout or "").strip() or None
+    return _viewer_login
+
+
+def relation(node: dict, viewer: str | None) -> str:
+    """`self` if the node's author is the authenticated viewer, else `other`.
+
+    Fails safe to `self` when the viewer login is unknown: a wrong `self` keeps
+    the response private in the chat and is recoverable, whereas a wrong `other`
+    would post the exact public reply-to-yourself anti-pattern this guards.
+    """
+    if viewer is None:
+        return "self"
+    return "self" if author_of(node) == viewer else "other"
+
+
+def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
     """Compare the fetched PR against the prior state.
 
     Returns (events, new_state, terminal). `terminal` is set on merged/closed,
-    which the caller uses to stop the loop.
+    which the caller uses to stop the loop. `viewer` is the authenticated gh
+    login, used to tag each new review/comment `self` or `other`.
     """
     state = (pr.get("state") or "").upper()
 
@@ -155,7 +207,15 @@ def diff(pr: dict, prior: dict) -> tuple:
     if state == "CLOSED":
         return [("closed",)], None, True
 
-    review_ids = [str(r.get("id")) for r in (pr.get("reviews") or []) if r.get("id") is not None]
+    # A review still in PENDING state is the author's own unsubmitted draft
+    # (GitHub hides pending reviews from everyone but their author). It is not an
+    # actionable event, and — load-bearing — its id must not enter the seen-set:
+    # the review keeps that same id once submitted, so recording it while pending
+    # would dedup away the submitted review and strand it as "pending" forever.
+    # Dropping pending reviews from both emission and the baseline lets the
+    # submitted review read as new.
+    reviews = [r for r in (pr.get("reviews") or []) if (r.get("state") or "").upper() != "PENDING"]
+    review_ids = [str(r.get("id")) for r in reviews if r.get("id") is not None]
     comment_ids = [str(c.get("id")) for c in (pr.get("comments") or []) if c.get("id") is not None]
     failing = failing_checks(pr.get("statusCheckRollup"))
     ci_failing = bool(failing)
@@ -169,14 +229,14 @@ def diff(pr: dict, prior: dict) -> tuple:
         events.append(("ci-failed", ",".join(failing)))
     if behind and not prior["behind"]:
         events.append(("base-behind",))
-    for r in pr.get("reviews") or []:
+    for r in reviews:
         rid = str(r.get("id"))
         if r.get("id") is not None and rid not in seen_reviews:
-            events.append(("new-review", rid, author_of(r), (r.get("state") or "").upper()))
+            events.append(("new-review", rid, author_of(r), (r.get("state") or "").upper(), relation(r, viewer)))
     for c in pr.get("comments") or []:
         cid = str(c.get("id"))
         if c.get("id") is not None and cid not in seen_comments:
-            events.append(("new-comment", cid, author_of(c)))
+            events.append(("new-comment", cid, author_of(c), relation(c, viewer)))
 
     new_state = {
         "reviews": review_ids,
@@ -204,7 +264,7 @@ def poll_once(state_file: str) -> tuple:
         sys.stderr.write("sapa watch: skipped poll (empty or failed fetch)\n")
         return False, False  # (terminal, changed)
     prior = load_state(state_file)
-    events, new_state, terminal = diff(pr, prior)
+    events, new_state, terminal = diff(pr, prior, viewer_login())
     emit(events)
     if not terminal:
         save_state(state_file, new_state)
