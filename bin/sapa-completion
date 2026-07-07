@@ -1,0 +1,93 @@
+#!/bin/bash
+# sapa completion — print a shell completion script.
+#
+# Prints a completion script for the named shell to stdout. sapa never edits your
+# shell config itself (the installer only prints a PATH hint); enable completion
+# by evaluating this output from your shell's startup file.
+#
+# Usage:
+#   sapa completion zsh        # print a zsh completion script
+#
+# Enable (zsh): add to your ~/.zshrc
+#   eval "$(sapa completion zsh)"
+
+set -euo pipefail
+
+shell="${1:-}"
+case "$shell" in
+  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+if [ -z "$shell" ]; then
+  echo "sapa completion: expected a shell" >&2
+  echo "usage: sapa completion zsh" >&2
+  exit 2
+fi
+if [ "$shell" != "zsh" ]; then
+  echo "sapa completion: unsupported shell: $shell (only zsh)" >&2
+  echo "usage: sapa completion zsh" >&2
+  exit 2
+fi
+
+# The command list + descriptions come from the dispatcher's own help block, so
+# completion never drifts from the commands sapa actually exposes. The dispatcher
+# is our sibling in bin/ — it execs us from there — so read it by that path.
+dispatcher="$(dirname "$0")/sapa"
+if [ ! -r "$dispatcher" ]; then
+  echo "sapa completion: cannot read the sapa dispatcher at $dispatcher" >&2
+  exit 1
+fi
+
+# Scrape the dispatcher's `# Commands:` block (format: `#   <name>   <description>`)
+# into tab-separated name/description pairs. Colons are escaped here so they can't
+# be read as the _describe `name:description` separator.
+scrape_commands() {
+  awk '
+    /^# Commands:/ { inblock = 1; next }
+    inblock && /^#   [a-z]/ {
+      line = $0
+      sub(/^#   /, "", line)
+      name = line
+      sub(/[[:space:]].*/, "", name)
+      desc = line
+      sub(/^[^[:space:]]+[[:space:]]+/, "", desc)
+      gsub(/:/, "\\:", desc)        # protect the _describe name:desc separator
+      print name "\t" desc
+    }
+    inblock && !/^#/ { inblock = 0 }
+  ' "$dispatcher"
+}
+
+# Wrap each pair as a single-quoted zsh array element, escaping any embedded
+# single quote as '\'' (descriptions like "branch's" contain them).
+build_pairs() {
+  scrape_commands | while IFS="$(printf '\t')" read -r name desc; do
+    name=${name//\'/\'\\\'\'}
+    desc=${desc//\'/\'\\\'\'}
+    printf "    '%s:%s'\n" "$name" "$desc"
+  done
+}
+
+pairs="$(build_pairs)"
+
+# zsh completion. `#compdef sapa` lets it also work if dropped into an fpath dir;
+# the trailing `compdef` wires it up when eval'd interactively.
+cat <<EOF
+#compdef sapa
+# zsh completion for sapa. Enable with: eval "\$(sapa completion zsh)"
+_sapa() {
+  local -a _sapa_cmds
+  _sapa_cmds=(
+$pairs
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'sapa command' _sapa_cmds
+    return
+  fi
+  case "\${words[2]}" in
+    install)    _values 'install action' 'uninstall' ;;
+    completion) _values 'shell' 'zsh' ;;
+  esac
+}
+compdef _sapa sapa
+EOF

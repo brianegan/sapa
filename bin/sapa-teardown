@@ -1,5 +1,5 @@
 #!/bin/bash
-# sapa-teardown — remove a finished stream's worktree and local branch.
+# sapa teardown — remove a finished stream's worktree and local branch.
 #
 # The terminal step of watch: once a PR is merged, the stream is done. This
 # removes the worktree and deletes its local branch so there is no manual
@@ -28,8 +28,8 @@
 # Visual Studio Code) in System Settings > Privacy & Security > Accessibility.
 #
 # Usage:
-#   sapa-teardown [worktree-path]   # defaults to the current directory
-#   sapa-teardown --force [path]    # remove even with uncommitted changes
+#   sapa teardown [worktree-path]   # defaults to the current directory
+#   sapa teardown --force [path]    # remove even with uncommitted changes
 
 set -euo pipefail
 
@@ -96,9 +96,9 @@ APPLESCRIPT
   case "$result" in
     ""|closed|no-editor|no-match) : ;;  # done, or a benign no-op — stay quiet
     error:-25211|*"not allowed assistive access"*)
-      printf '%s\n' "sapa-teardown: couldn't close the editor window — grant Accessibility to the app running this terminal (e.g. Visual Studio Code) in System Settings > Privacy & Security > Accessibility, then it will close on the next teardown." >&2 ;;
+      printf '%s\n' "sapa teardown: couldn't close the editor window — grant Accessibility to the app running this terminal (e.g. Visual Studio Code) in System Settings > Privacy & Security > Accessibility, then it will close on the next teardown." >&2 ;;
     *)
-      printf '%s\n' "sapa-teardown: couldn't close the editor window ($result); left it open." >&2 ;;
+      printf '%s\n' "sapa teardown: couldn't close the editor window ($result); left it open." >&2 ;;
   esac
 }
 
@@ -108,7 +108,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --force) force=true ;;
     -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
-    -*) echo "sapa-teardown: unknown flag: $1" >&2; exit 2 ;;
+    -*) echo "sapa teardown: unknown flag: $1" >&2; exit 2 ;;
     *) target="$1" ;;
   esac
   shift
@@ -125,12 +125,12 @@ while [ -n "$dir" ] && [ "$dir" != "/" ]; do
   dir=$(dirname "$dir")
 done
 if [ -z "$project_root" ]; then
-  echo "sapa-teardown: no .bare found above $target" >&2
+  echo "sapa teardown: no .bare found above $target" >&2
   exit 1
 fi
 
 if [ "$target" = "$project_root" ]; then
-  echo "sapa-teardown: refusing to remove the project root itself" >&2
+  echo "sapa teardown: refusing to remove the project root itself" >&2
   exit 1
 fi
 
@@ -159,7 +159,7 @@ fi
 
 # Guard: never destroy uncommitted work.
 if ! $force && [ -n "$(git -C "$target" status --porcelain)" ]; then
-  echo "sapa-teardown: $target has uncommitted changes; not removing." >&2
+  echo "sapa teardown: $target has uncommitted changes; not removing." >&2
   echo "Commit, stash, or rerun with --force." >&2
   exit 3
 fi
@@ -176,7 +176,7 @@ if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
   git -C "$project_root" branch -D "$branch" >/dev/null 2>&1 || true
 fi
 
-echo "sapa-teardown: removed worktree $target and branch $branch"
+echo "sapa teardown: removed worktree $target and branch $branch"
 
 # Best-effort, last: closing the window kills the terminal running this script
 # when invoked from inside it, which is exactly the intended terminal action.

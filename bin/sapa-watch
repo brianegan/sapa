@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sapa-watch — the mechanical half of watching a stream's PR.
+"""sapa watch — the mechanical half of watching a stream's PR.
 
 Watching a PR is two jobs. Detecting what changed is mechanical and identical
 every time; deciding what to do about it is not. This helper owns only the
@@ -34,10 +34,10 @@ empty baseline, so it surfaces the PR's current actionable state (useful when
 attaching to a PR that already has failing CI or unaddressed comments).
 
 Usage:
-    sapa-watch                 # poll with back-off, emit changes, exit on merged/closed
-    sapa-watch --once          # a single poll: diff against the state file, print, exit
-    sapa-watch --state-file P  # use P for last-seen state (default: <git-dir>/sapa-watch.json)
-    sapa-watch --start DIR     # locate the git dir for the state file from DIR (default: $PWD)
+    sapa watch                 # poll with back-off, emit changes, exit on merged/closed
+    sapa watch --once          # a single poll: diff against the state file, print, exit
+    sapa watch --state-file P  # use P for last-seen state (default: <git-dir>/sapa-watch.json)
+    sapa watch --start DIR     # locate the git dir for the state file from DIR (default: $PWD)
 
 Loop tuning via env (seconds): SAPA_WATCH_INTERVAL (base, default 30),
 SAPA_WATCH_MAX_INTERVAL (cap, default 300), SAPA_WATCH_BACKOFF (factor, default 2).
@@ -201,7 +201,7 @@ def poll_once(state_file: str) -> tuple:
     """
     pr = fetch_pr()
     if pr is None:
-        sys.stderr.write("sapa-watch: skipped poll (empty or failed fetch)\n")
+        sys.stderr.write("sapa watch: skipped poll (empty or failed fetch)\n")
         return False, False  # (terminal, changed)
     prior = load_state(state_file)
     events, new_state, terminal = diff(pr, prior)
@@ -227,6 +227,7 @@ def watch_loop(state_file: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
+        prog="sapa watch",
         add_help=True,
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -242,7 +243,7 @@ def main() -> int:
         poll_once(state_file)
         return 0
 
-    sys.stderr.write("sapa-watch: watching PR for the current branch\n")
+    sys.stderr.write("sapa watch: watching PR for the current branch\n")
     return watch_loop(state_file)
 
 

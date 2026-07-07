@@ -2,7 +2,7 @@
 # sapa — one command for the whole stream toolkit.
 #
 # A thin dispatcher: `sapa <command> [args]` runs the matching helper. Only this
-# script goes on your PATH (sapa-install links it); it resolves its own location
+# script goes on your PATH (sapa install links it); it resolves its own location
 # back through that symlink to the clone and calls the sibling helpers in bin/ by
 # path, so they never need to be on PATH themselves.
 #
@@ -20,10 +20,11 @@
 #   watch       poll the current branch's PR and emit one line per change
 #   teardown    remove a merged stream's worktree and local branch
 #   install     link sapa onto PATH and its skills into your agents
+#   completion  print a shell completion script (e.g. eval "$(sapa completion zsh)")
 
 set -euo pipefail
 
-commands="bootstrap worktree start config section watch teardown install"
+commands="bootstrap worktree start config section watch teardown install completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 
@@ -51,7 +52,7 @@ fi
 # reliable on macOS's BSD tools — handling absolute and relative link targets.
 # A twin of this loop lives in bin/sapa-install (which resolves to the repo root
 # instead); keep the two in sync. They can't share a sourced helper without a
-# bootstrapping problem, since sapa-install must run pre-PATH from a fresh clone.
+# bootstrapping problem, since sapa install must run pre-PATH from a fresh clone.
 self="$0"
 hops=0
 while [ -L "$self" ]; do

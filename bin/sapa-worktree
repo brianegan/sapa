@@ -1,13 +1,13 @@
 #!/bin/bash
-# sapa-worktree — spin up a per-branch worktree off origin/main and open it.
+# sapa worktree — spin up a per-branch worktree off origin/main and open it.
 #
 # Walks up from the current directory to the project root (the parent of the
-# `.bare` directory that sapa-bootstrap creates), fetches origin, adds a worktree
+# `.bare` directory that sapa bootstrap creates), fetches origin, adds a worktree
 # for the given branch, runs an optional per-project setup hook, and opens the
 # tree in your editor.
 #
 # Usage:
-#   sapa-worktree <branch-name> [start-point]
+#   sapa worktree <branch-name> [start-point]
 #
 # The editor is $EDITOR (falling back to $VISUAL). If neither is set the worktree
 # path is printed instead of opened.
@@ -19,8 +19,8 @@ case "${1:-}" in
 esac
 
 if [ -z "${1:-}" ]; then
-  echo "sapa-worktree: expected a branch name" >&2
-  echo "usage: sapa-worktree <branch-name> [start-point]" >&2
+  echo "sapa worktree: expected a branch name" >&2
+  echo "usage: sapa worktree <branch-name> [start-point]" >&2
   exit 2
 fi
 
@@ -38,7 +38,7 @@ while [ -n "$dir" ] && [ "$dir" != "/" ]; do
   dir=$(dirname "$dir")
 done
 if [ -z "$project_root" ]; then
-  echo "sapa-worktree: no .bare directory in any parent of the current directory" >&2
+  echo "sapa worktree: no .bare directory in any parent of the current directory" >&2
   exit 1
 fi
 

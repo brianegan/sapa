@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sapa-section — maintain a machine-managed section inside a body of text.
+"""sapa section — maintain a machine-managed section inside a body of text.
 
 Sapa owns a delimited section of a PR description or a GitHub issue body and
 keeps it current, but it must never clobber text a human has taken over. This
@@ -31,8 +31,8 @@ closing `<!-- /sapa:MARKER -->`); appending to it would duplicate the section,
 so the caller must stop and re-read the body in full instead.
 
 Usage:
-    sapa-section MARKER --content-file NEW [--body-file BODY] [--lock]
-    sapa-section MARKER --check [--body-file BODY]
+    sapa section MARKER --content-file NEW [--body-file BODY] [--lock]
+    sapa section MARKER --check [--body-file BODY]
 
 If --body-file is omitted the body is read from stdin. With --lock the section
 is written (or rewritten, if Sapa still owns it) as locked so it is never
@@ -103,7 +103,7 @@ def find_section(body: str, marker: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(add_help=True)
+    parser = argparse.ArgumentParser(prog="sapa section", add_help=True)
     parser.add_argument("marker")
     parser.add_argument("--content-file")
     parser.add_argument("--body-file")
