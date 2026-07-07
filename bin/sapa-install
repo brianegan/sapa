@@ -132,8 +132,9 @@ if [ "$mode" = "install" ]; then
   esac
 
   # A completion hint, not a failure — we never edit your shell config, same as
-  # the PATH hint above. Enabling it is one line the user adds themselves.
-  echo "sapa install: for zsh Tab-completion, add to your ~/.zshrc: eval \"\$(sapa completion zsh)\""
+  # the PATH hint above. We print one line the user can copy, paste, and run to
+  # enable it themselves.
+  echo "sapa install: for zsh Tab-completion, run: echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"
   exit 0
 fi
 

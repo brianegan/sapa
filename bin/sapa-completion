@@ -8,8 +8,8 @@
 # Usage:
 #   sapa completion zsh        # print a zsh completion script
 #
-# Enable (zsh): add to your ~/.zshrc
-#   eval "$(sapa completion zsh)"
+# Enable (zsh): run this once to append the enable line to your ~/.zshrc
+#   echo 'eval "$(sapa completion zsh)"' >> ~/.zshrc
 
 set -euo pipefail
 
@@ -74,7 +74,7 @@ pairs="$(build_pairs)"
 # the trailing `compdef` wires it up when eval'd interactively.
 cat <<EOF
 #compdef sapa
-# zsh completion for sapa. Enable with: eval "\$(sapa completion zsh)"
+# zsh completion for sapa. Enable: echo 'eval "\$(sapa completion zsh)"' >> ~/.zshrc
 _sapa() {
   local -a _sapa_cmds
   _sapa_cmds=(

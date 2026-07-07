@@ -79,14 +79,15 @@ half only — it can't put the `sapa` command on your `PATH`.
 
 ### Shell completion (optional)
 
-For zsh Tab-completion of subcommands, add this to your `~/.zshrc`:
+For zsh Tab-completion of subcommands, run this once — it appends the enable line
+to your `~/.zshrc`:
 
 ```sh
-eval "$(sapa completion zsh)"
+echo 'eval "$(sapa completion zsh)"' >> ~/.zshrc
 ```
 
-sapa never edits your shell config for you — the installer just prints this hint,
-the same way it hints about `PATH`.
+sapa never edits your shell config for you — the installer just prints this same
+line for you to copy, paste, and run, the way it hints about `PATH`.
 
 ## Flow
 
