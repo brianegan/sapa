@@ -77,6 +77,18 @@ instead of auto-detecting.
 GitHub access uses `gh`. `npx skills add <repo>` is an alternative for the skills
 half only — it can't put the `sapa` command on your `PATH`.
 
+### Shell completion (optional)
+
+For zsh Tab-completion of subcommands, run this once — it appends the enable line
+to your `~/.zshrc`:
+
+```sh
+echo 'eval "$(sapa completion zsh)"' >> ~/.zshrc
+```
+
+sapa never edits your shell config for you — the installer just prints this same
+line for you to copy, paste, and run, the way it hints about `PATH`.
+
 ## Flow
 
 ```sh

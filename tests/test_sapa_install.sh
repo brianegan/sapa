@@ -34,6 +34,9 @@ if [ -L "$home/.codex/skills/sapa-plan" ]; then ok "links a skill into codex"; e
 if [ "$(readlink "$bin_dir/sapa")" = "$clone/bin/sapa" ]; then ok "sapa target points into the clone"; else bad "sapa target points into the clone ($(readlink "$bin_dir/sapa"))"; fi
 if readlink "$home/.claude/skills/sapa-plan" | grep -q '/skill/sapa-plan$'; then ok "skill target points into the clone"; else bad "skill target points into the clone"; fi
 
+# --- install prints a copy-paste-and-run completion hint (shell config untouched) ---
+if printf '%s' "$out" | grep -qF "echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"; then ok "install hints at completion"; else bad "install hints at completion ($out)"; fi
+
 # --- re-running is idempotent ---
 out="$(HOME="$home" bash "$INSTALL" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ -L "$bin_dir/sapa" ]; then ok "re-install is idempotent"; else bad "re-install is idempotent (rc=$rc, $out)"; fi
@@ -80,6 +83,7 @@ if [ ! -e "$bin_dir/sapa-start" ]; then ok "uninstall removes a legacy sapa link
 if [ ! -e "$home/.claude/skills/sapa-plan" ]; then ok "uninstall removes a sapa skill link"; else bad "uninstall removes a sapa skill link"; fi
 if [ -f "$foreign" ]; then ok "uninstall leaves a foreign regular file"; else bad "uninstall leaves a foreign regular file"; fi
 if [ -L "$bin_dir/sapa-worktree" ]; then ok "uninstall leaves a foreign symlink"; else bad "uninstall leaves a foreign symlink"; fi
+if printf '%s' "$out" | grep -q 'sapa completion zsh'; then bad "uninstall does not print the completion hint"; else ok "uninstall does not print the completion hint"; fi
 
 # --- --help works ---
 out="$(bash "$INSTALL" --help 2>&1)"; rc=$?

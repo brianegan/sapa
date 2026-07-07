@@ -1,13 +1,13 @@
 #!/bin/bash
-# sapa-bootstrap — clone or init a repo into the bare-repo worktree layout.
+# sapa bootstrap — clone or init a repo into the bare-repo worktree layout.
 #
-# Sets up the `.bare` + pointer-file layout that sapa-worktree and the rest of
+# Sets up the `.bare` + pointer-file layout that sapa worktree and the rest of
 # sapa expect: a bare clone in `.bare`, a `.git` pointer beside it, and a `main`
 # worktree checked out ready to work in.
 #
 # Usage:
-#   sapa-bootstrap <repository-url>     # clone an existing repo
-#   sapa-bootstrap init <repo-name>     # start a fresh local repo (no remote)
+#   sapa bootstrap <repository-url>     # clone an existing repo
+#   sapa bootstrap init <repo-name>     # start a fresh local repo (no remote)
 
 set -euo pipefail
 
@@ -19,36 +19,36 @@ esac
 if [ "${1:-}" = "init" ]; then
   repo_name="${2:-}"
   if [ -z "$repo_name" ]; then
-    echo "sapa-bootstrap: init needs a repo name" >&2
-    echo "usage: sapa-bootstrap init <repo-name>" >&2
+    echo "sapa bootstrap: init needs a repo name" >&2
+    echo "usage: sapa bootstrap init <repo-name>" >&2
     exit 2
   fi
 
-  mkdir "$repo_name" || { echo "sapa-bootstrap: could not create $repo_name" >&2; exit 1; }
-  cd "$repo_name" || { echo "sapa-bootstrap: could not enter $repo_name" >&2; exit 1; }
+  mkdir "$repo_name" || { echo "sapa bootstrap: could not create $repo_name" >&2; exit 1; }
+  cd "$repo_name" || { echo "sapa bootstrap: could not enter $repo_name" >&2; exit 1; }
 
   git init --bare .bare
   echo "gitdir: ./.bare" > .git
   # --orphan needs git >= 2.42.
   git worktree add --orphan -b main main
 
-  echo "sapa-bootstrap: ready in $repo_name/main"
+  echo "sapa bootstrap: ready in $repo_name/main"
   exit 0
 fi
 
 repo_url="${1:-}"
 if [ -z "$repo_url" ]; then
-  echo "sapa-bootstrap: expected a repository URL" >&2
-  echo "usage: sapa-bootstrap <repository-url>" >&2
-  echo "       sapa-bootstrap init <repo-name>" >&2
+  echo "sapa bootstrap: expected a repository URL" >&2
+  echo "usage: sapa bootstrap <repository-url>" >&2
+  echo "       sapa bootstrap init <repo-name>" >&2
   exit 2
 fi
 
 # Derive the project directory from the URL (e.g. proj from proj.git).
 repo_name="$(basename "$repo_url" .git)"
 
-mkdir "$repo_name" || { echo "sapa-bootstrap: could not create $repo_name" >&2; exit 1; }
-cd "$repo_name" || { echo "sapa-bootstrap: could not enter $repo_name" >&2; exit 1; }
+mkdir "$repo_name" || { echo "sapa bootstrap: could not create $repo_name" >&2; exit 1; }
+cd "$repo_name" || { echo "sapa bootstrap: could not enter $repo_name" >&2; exit 1; }
 
 # Clone as a bare repo into .bare, with the pointer file beside it.
 git clone --bare "$repo_url" .bare
@@ -65,4 +65,4 @@ else
 fi
 git worktree add "$branch"
 
-echo "sapa-bootstrap: ready in $repo_name/$branch"
+echo "sapa bootstrap: ready in $repo_name/$branch"
