@@ -164,6 +164,16 @@ if ! $force && [ -n "$(git -C "$target" status --porcelain)" ]; then
   exit 3
 fi
 
+# Clear this stream's window-switcher status file while the worktree (and its
+# `.bare` ancestor that `sapa status` walks up to) still exists, so the switcher
+# stops showing a stream that is about to be gone. Best-effort — a missing helper
+# or a failure here never blocks the teardown. Only the `sapa` dispatcher is on
+# PATH, so call the helper by its sibling path, as the dispatcher itself does.
+status_bin="$(dirname "$0")/sapa-status"
+if [ -x "$status_bin" ]; then
+  "$status_bin" --clear --start "$target" >/dev/null 2>&1 || true
+fi
+
 # Run git from the project root so the removal works even if the caller is
 # sitting inside the worktree being removed.
 if $force; then

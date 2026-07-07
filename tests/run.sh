@@ -18,11 +18,13 @@ run() {
 run test_sapa_dispatch.sh  bash    "$HERE/test_sapa_dispatch.sh"
 run test_sapa_section.py   python3 "$HERE/test_sapa_section.py"
 run test_sapa_watch.py     python3 "$HERE/test_sapa_watch.py"
+run test_sapa_status.py    python3 "$HERE/test_sapa_status.py"
 run test_sapa_config.sh    bash    "$HERE/test_sapa_config.sh"
 run test_sapa_bootstrap.sh bash    "$HERE/test_sapa_bootstrap.sh"
 run test_sapa_start.sh     bash    "$HERE/test_sapa_start.sh"
 run test_sapa_teardown.sh  bash    "$HERE/test_sapa_teardown.sh"
 run test_sapa_install.sh   bash    "$HERE/test_sapa_install.sh"
+run test_sapa_uninstall.sh bash    "$HERE/test_sapa_uninstall.sh"
 run test_sapa_completion.sh bash   "$HERE/test_sapa_completion.sh"
 
 if [ "$fail" -ne 0 ]; then

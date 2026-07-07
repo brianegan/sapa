@@ -75,6 +75,76 @@ fi
 out="$(HOME="$home" bash "$INSTALL" uninstall 2>&1)"; rc=$?
 if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "sapa uninstall"; then ok "install rejects uninstall, points at 'sapa uninstall'"; else bad "install rejects uninstall (rc=$rc, $out)"; fi
 
+# --- run-state status hooks: wired on install, idempotent, and never touching
+#     hooks the user already has (removal is covered in test_sapa_uninstall.sh) ---
+# count_hook <settings> <event> <needle>: how many hook commands under <event>
+# contain <needle>. The heredoc lives in the function body (parsed at definition
+# time), so calling it inside $() does not hit the bash 3.2 heredoc-in-$() bug.
+count_hook() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+f, ev, needle = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(f))
+except (OSError, ValueError):
+    print(0); sys.exit(0)
+n = 0
+for g in d.get("hooks", {}).get(ev, []):
+    for h in g.get("hooks", []):
+        if needle in (h.get("command") or ""):
+            n += 1
+print(n)
+PY
+}
+
+home3="$root/home3"
+mkdir -p "$home3/.claude"
+# Seed a settings.json that already has a hook and a non-hook key, to prove we
+# only add our own entries and disturb nothing else.
+cat > "$home3/.claude/settings.json" <<'JSON'
+{
+  "model": "opus",
+  "hooks": {
+    "Stop": [ { "hooks": [ { "type": "command", "command": "keep-me.sh" } ] } ]
+  }
+}
+JSON
+sf="$home3/.claude/settings.json"
+
+out="$(HOME="$home3" SAPA_AGENTS=claude bash "$INSTALL" 2>&1)"; rc=$?
+if [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "1" ] \
+   && [ "$(count_hook "$sf" Notification 'status --state needs-you')" = "1" ] \
+   && [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ]; then
+  ok "install wires the three run-state status hooks"
+else
+  bad "install wires the three run-state status hooks (rc=$rc, $out)"
+fi
+if printf '%s' "$out" | grep -q "wired run-state status hooks"; then ok "install reports wiring the hooks"; else bad "install reports wiring the hooks ($out)"; fi
+if [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then ok "install preserves an existing hook"; else bad "install preserves an existing hook"; fi
+if [ "$(count_hook "$sf" Stop "$clone/bin/sapa status --state idle")" = "1" ]; then ok "hook command uses the absolute clone path"; else bad "hook command uses the absolute clone path"; fi
+# Model key (and anything else) survives the JSON round-trip.
+if grep -q '"model"' "$sf"; then ok "install leaves unrelated settings keys intact"; else bad "install leaves unrelated settings keys intact"; fi
+
+# --- re-install does not duplicate ---
+HOME="$home3" SAPA_AGENTS=claude bash "$INSTALL" >/dev/null 2>&1
+if [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ] \
+   && [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then
+  ok "re-install does not duplicate the status hook"
+else
+  bad "re-install does not duplicate the status hook (idle=$(count_hook "$sf" Stop 'status --state idle'))"
+fi
+
+# --- an unreadable settings.json never aborts the install (best-effort hooks) ---
+# A settings.json that is somehow a directory can't be read as JSON; wiring the
+# hooks must be skipped, not abort an install whose symlinks already landed.
+home5="$root/home5"; mkdir -p "$home5/.claude/settings.json"
+out="$(HOME="$home5" SAPA_AGENTS=claude bash "$INSTALL" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ -L "$home5/.claude/skills/sapa-plan" ]; then
+  ok "a broken settings.json does not abort the install"
+else
+  bad "a broken settings.json does not abort the install (rc=$rc, $out)"
+fi
+
 # --- --help works ---
 out="$(bash "$INSTALL" --help 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "Usage:"; then ok "--help prints usage"; else bad "--help prints usage (rc=$rc)"; fi

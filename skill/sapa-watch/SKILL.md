@@ -14,6 +14,10 @@ read it, the base branch, and the PR state from `sapa config -p`; GitHub goes
 through `gh`; never clobber human text (PR body and issue plan go through
 `sapa section`).
 
+Before anything else, mark the stream's stage for the window switcher: run `sapa
+status --stage watch` (best-effort — it no-ops outside a sapa stream). Teardown on
+merge clears the status file, so no explicit clear is needed here.
+
 ## Find the PR
 
 Use the PR for the current branch. `gh pr view` (or `gh pr list --head <branch>`)

@@ -14,6 +14,9 @@ to date" surprise at merge time. Does not push or open a PR — that is
 Rules (always): the configured remote (default `origin`) is the only remote;
 GitHub goes through `gh`.
 
+Before anything else, mark the stream's stage for the window switcher: run `sapa
+status --stage gate` (best-effort — it no-ops outside a sapa stream).
+
 ## Step 1 — Locate the config
 
 Run `sapa config -p` to print the discovered `.sapa.yaml` (it walks up from the

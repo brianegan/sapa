@@ -16,6 +16,9 @@ from the issue body.
 
 ## Steps
 
+First, mark the stream's stage for the window switcher: run `sapa status --stage
+build` (best-effort — it no-ops outside a sapa stream and never needs your input).
+
 1. **Find the issue.** Use the number the user gave, else derive it from the
    branch name (a leading number like `42-add-widget` → 42), else ask.
 2. **Read the recorded plan.** Find the `sapa:plan` comment and read its body

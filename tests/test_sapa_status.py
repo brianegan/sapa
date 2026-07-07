@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Tests for sapa-status, the per-stream status writer for the window switcher.
+
+Run: python3 tests/test_sapa_status.py
+
+Assert on external, observable behavior: the JSON file that lands in the registry,
+that --state and --stage merge rather than clobber each other, that the writer
+self-guards outside a sapa stream (the load-bearing case — the run-state hooks
+fire in every Claude session, not just sapa ones), and that --clear removes it.
+
+The registry is redirected with SAPA_STATUS_DIR so nothing touches the real
+~/.sapa. A fixture "stream" is just a temp `<root>/proj/.bare` plus a
+`<root>/proj/<branch>/` worktree dir — enough for the `.bare` walk-up; the dirs
+need not be real git repos (git resolution falls back to the basename).
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATUS = os.path.join(HERE, "..", "bin", "sapa-status")
+
+pass_ = 0
+fail = 0
+
+
+def ok(msg):
+    global pass_
+    print("ok   " + msg)
+    pass_ += 1
+
+
+def bad(msg):
+    global fail
+    print("FAIL " + msg)
+    fail += 1
+
+
+def run(args, start, status_dir):
+    env = dict(os.environ)
+    env["SAPA_STATUS_DIR"] = status_dir
+    # PWD is what sapa-status defaults --start to; set it too so the default path
+    # is exercised, but pass --start explicitly for determinism.
+    env["PWD"] = start
+    return subprocess.run(
+        [STATUS, *args, "--start", start],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+    )
+
+
+def make_stream(root, branch="42-a-feature"):
+    proj = os.path.join(root, "proj")
+    os.makedirs(os.path.join(proj, ".bare"))
+    wt = os.path.join(proj, branch)
+    os.makedirs(wt)
+    return proj, wt, branch
+
+
+def read_entry(status_dir, branch):
+    with open(os.path.join(status_dir, branch + ".json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+with tempfile.TemporaryDirectory() as d:
+    status_dir = os.path.join(d, "registry")
+
+    # --- --stage writes a keyed file with the expected fields ---
+    proj, wt, branch = make_stream(os.path.join(d, "s1"))
+    r = run(["--stage", "gate"], wt, status_dir)
+    entry_path = os.path.join(status_dir, branch + ".json")
+    if r.returncode == 0 and os.path.isfile(entry_path):
+        ok("--stage writes a file keyed by the worktree basename")
+    else:
+        bad("--stage writes a file (rc=%d, %s)" % (r.returncode, r.stderr))
+    e = read_entry(status_dir, branch)
+    if e.get("stage") == "gate" and e.get("branch") == branch and "updated" in e:
+        ok("--stage sets stage, branch, and updated")
+    else:
+        bad("--stage fields wrong: %r" % e)
+
+    # --- --state merges without clobbering the existing stage ---
+    r = run(["--state", "busy"], wt, status_dir)
+    e = read_entry(status_dir, branch)
+    if r.returncode == 0 and e.get("state") == "busy" and e.get("stage") == "gate":
+        ok("--state merges in without clobbering stage")
+    else:
+        bad("--state merge wrong (rc=%d): %r" % (r.returncode, e))
+
+    # --- and the reverse: a later --stage keeps the state ---
+    r = run(["--stage", "watch"], wt, status_dir)
+    e = read_entry(status_dir, branch)
+    if e.get("stage") == "watch" and e.get("state") == "busy":
+        ok("--stage keeps the existing state")
+    else:
+        bad("--stage clobbered state: %r" % e)
+
+    # --- --clear removes the file ---
+    r = run(["--clear"], wt, status_dir)
+    if r.returncode == 0 and not os.path.exists(entry_path):
+        ok("--clear removes the file")
+    else:
+        bad("--clear did not remove the file (rc=%d)" % r.returncode)
+
+    # --- --clear on a missing file is a no-op success ---
+    r = run(["--clear"], wt, status_dir)
+    if r.returncode == 0:
+        ok("--clear on a missing file exits 0")
+    else:
+        bad("--clear on missing file failed (rc=%d, %s)" % (r.returncode, r.stderr))
+
+    # --- self-guard: outside any sapa stream, do nothing and exit 0 ---
+    outside = os.path.join(d, "not-a-stream")
+    os.makedirs(outside)
+    before = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    r = run(["--state", "busy"], outside, status_dir)
+    after = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    if r.returncode == 0 and before == after:
+        ok("self-guards outside a sapa stream (exit 0, writes nothing)")
+    else:
+        bad("self-guard failed (rc=%d, new files: %r)" % (r.returncode, after - before))
+
+    # --- the project root itself is not a stream ---
+    r = run(["--state", "busy"], proj, status_dir)
+    if r.returncode == 0 and not os.path.exists(os.path.join(status_dir, "proj.json")):
+        ok("the project root is not treated as a stream")
+    else:
+        bad("project root wrongly treated as a stream (rc=%d)" % r.returncode)
+
+    # --- nothing to do is a usage error ---
+    r = run([], wt, status_dir)
+    if r.returncode != 0:
+        ok("no action flag is a usage error")
+    else:
+        bad("no action flag should error")
+
+print()
+print("%d/%d passed" % (pass_, pass_ + fail))
+sys.exit(1 if fail else 0)

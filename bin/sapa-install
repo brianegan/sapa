@@ -11,6 +11,12 @@
 #
 # Removal is a separate command: `sapa uninstall`.
 #
+# When Claude Code is a target, it also wires three run-state hooks into
+# ~/.claude/settings.json (UserPromptSubmit/Notification/Stop → `sapa status
+# --state`) so a window switcher can show whether each stream is running, at rest,
+# or waiting. This is the one config file sapa edits; it touches only its own
+# entries and `sapa uninstall` removes them.
+#
 # Usage:
 #   sapa install              # link sapa and skills
 #
@@ -61,9 +67,9 @@ src_bindir="$(cd "$(dirname "$self")" && pwd)"
 SRC="$(cd "$src_bindir/.." && pwd)"
 
 # The link inventory (BINS/LEGACY_BINS/SKILLS), the target bin_dir, the agents to
-# target, and remove_link — shared with sapa-uninstall so the two can't drift.
-# (src_bindir is the clone we install *from*; bin_dir, set there, is where the
-# links go — do not conflate the two.)
+# target, remove_link, and manage_hooks — shared with sapa-uninstall so the two
+# can't drift. (src_bindir is the clone we install *from*; bin_dir, set there, is
+# where the links go — do not conflate the two.)
 . "$src_bindir/sapa-install-common"
 
 mkdir -p "$bin_dir"
@@ -94,13 +100,26 @@ else
   echo "sapa install: no coding agents detected (~/.claude, ~/.codex); set SAPA_AGENTS to link skills anyway"
 fi
 
+# Wire the run-state status hooks into Claude Code, when claude is a target. This
+# is the sole config-file edit sapa makes; it is idempotent and reversible.
+case " $agents " in
+  *" claude "*)
+    # Never let a hook-wiring hiccup abort an install whose symlinks already
+    # landed — the helper already warns on stderr for the failures it handles, and
+    # running it as an `if` condition keeps `set -e` from aborting on the rest.
+    if manage_hooks add "$HOME/.claude/settings.json" "$SRC/bin/sapa"; then
+      echo "sapa install: wired run-state status hooks into ~/.claude/settings.json (undo with: sapa uninstall)"
+    fi
+    ;;
+esac
+
 # A PATH hint, not a failure — sapa is linked either way.
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) echo "sapa install: note: $bin_dir is not on your PATH; add it, e.g. export PATH=\"$bin_dir:\$PATH\"" ;;
 esac
 
-# A completion hint, not a failure — we never edit your shell config, same as
-# the PATH hint above. We print one line the user can copy, paste, and run to
-# enable it themselves.
+# A completion hint, not a failure — we never edit your shell config, same as the
+# PATH hint above. We print one line the user can copy, paste, and run to enable
+# it themselves.
 echo "sapa install: for zsh Tab-completion, run: echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"

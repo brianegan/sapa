@@ -90,6 +90,18 @@ else
 fi
 rm -f "$denier"
 
+# --- teardown clears the stream's window-switcher status file ---
+status_dir="$(mktemp -d)"
+git -C "$proj/main" worktree add -q "$proj/statusy" -b statusy
+SAPA_STATUS_DIR="$status_dir" "$HERE/../bin/sapa-status" --stage watch --start "$proj/statusy"
+out="$(SAPA_STATUS_DIR="$status_dir" bash "$TEARDOWN" "$proj/statusy" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -e "$status_dir/statusy.json" ]; then
+  ok "clears the status file on teardown"
+else
+  bad "clears the status file on teardown (rc=$rc, left: $(ls -A "$status_dir" 2>/dev/null))"
+fi
+rm -rf "$status_dir"
+
 # --- refuses to remove the project root ---
 out="$(bash "$TEARDOWN" "$proj/main" 2>&1)"; rc=$?
 # main is a worktree, not the root; the root itself has no branch checkout.

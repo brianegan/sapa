@@ -57,6 +57,48 @@ mkdir -p "$home3/.claude"
 out="$(HOME="$home3" bash "$UNINSTALL" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "removed 0 links"; then ok "uninstall on a clean home removes nothing, exits 0"; else bad "uninstall on a clean home (rc=$rc, $out)"; fi
 
+# --- uninstall removes the run-state status hooks it added, leaving others ---
+# count_hook <settings> <event> <needle>: how many hook commands under <event>
+# contain <needle>. The heredoc lives in the function body (parsed at definition
+# time), so calling it inside $() does not hit the bash 3.2 heredoc-in-$() bug.
+count_hook() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+f, ev, needle = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(f))
+except (OSError, ValueError):
+    print(0); sys.exit(0)
+n = 0
+for g in d.get("hooks", {}).get(ev, []):
+    for h in g.get("hooks", []):
+        if needle in (h.get("command") or ""):
+            n += 1
+print(n)
+PY
+}
+
+home4="$root/home4"; mkdir -p "$home4/.claude"
+cat > "$home4/.claude/settings.json" <<'JSON'
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "keep-me.sh" } ] } ] } }
+JSON
+sf="$home4/.claude/settings.json"
+HOME="$home4" SAPA_AGENTS=claude bash "$INSTALL" >/dev/null 2>&1     # wires our hooks
+HOME="$home4" SAPA_AGENTS=claude bash "$UNINSTALL" >/dev/null 2>&1   # should unwire them
+if [ "$(count_hook "$sf" Stop 'status --state idle')" = "0" ] \
+   && [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "0" ] \
+   && [ "$(count_hook "$sf" Notification 'status --state needs-you')" = "0" ]; then
+  ok "uninstall removes our status hooks"
+else
+  bad "uninstall removes our status hooks"
+fi
+if [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then ok "uninstall preserves an existing hook"; else bad "uninstall preserves an existing hook"; fi
+
+# --- uninstall with no settings.json present never creates one ---
+home5="$root/home5"; mkdir -p "$home5/.claude"
+HOME="$home5" SAPA_AGENTS=claude bash "$UNINSTALL" >/dev/null 2>&1
+if [ ! -e "$home5/.claude/settings.json" ]; then ok "uninstall does not create a settings.json"; else bad "uninstall does not create a settings.json"; fi
+
 # --- unknown argument errors ---
 out="$(bash "$UNINSTALL" bogus 2>&1)"; rc=$?
 if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "unknown argument"; then ok "unknown argument exits 2"; else bad "unknown argument exits 2 (rc=$rc, $out)"; fi
