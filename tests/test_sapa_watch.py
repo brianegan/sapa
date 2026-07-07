@@ -184,6 +184,23 @@ def test_unresolved_viewer_fails_safe_to_self():
 
 
 @case
+def test_pending_review_is_ignored_until_submitted():
+    # Regression: a PENDING review is the author's own unsubmitted draft. It must
+    # not be emitted, and — load-bearing — its id must not be recorded as seen,
+    # since the review keeps that id when submitted. Otherwise the submitted
+    # review dedups away and the watcher is stranded on the pending sighting.
+    pending = pr(reviews=[{"id": "R1", "author": {"login": "me"}, "state": "PENDING"}])
+    out, _, after = run_once(pending, login="me")
+    assert events(out) == [], out
+    assert after["reviews"] == [], after
+    # Submitting keeps the id but flips the state -> now a real, new event.
+    submitted = pr(reviews=[{"id": "R1", "author": {"login": "me"}, "state": "APPROVED"}])
+    out2, _, after2 = run_once(submitted, prior_state=after, login="me")
+    assert events(out2) == [["new-review", "R1", "me", "APPROVED", "self"]], out2
+    assert after2["reviews"] == ["R1"], after2
+
+
+@case
 def test_empty_but_successful_fetch_is_guarded():
     # The #42 bug: an empty-but-successful poll must not count as a change and
     # must not clobber the baseline.

@@ -210,7 +210,10 @@ me through my existing notification hook, which opens the right window on click.
   current branch, guards empty or failed fetches so a bad cycle never counts as a
   change, dedupes against last-seen state, and emits one structured line per real
   change (`ci-failed`, `new-review`, `new-comment`, `base-behind`, `merged`,
-  `closed`), exiting on the terminal states. The skill runs it via Monitor and
+  `closed`), exiting on the terminal states. A review still in `PENDING` state is
+  the author's own unsubmitted draft and is skipped entirely — not emitted and
+  not recorded as seen — so the review reads as new when it is submitted rather
+  than being deduped away and stranded as pending. The skill runs it via Monitor and
   decides what each event warrants. This extracts the detection half — mechanical
   and identical every session — into tested code, leaving only the response half
   (which the agent must reason about) in the skill, mirroring how `sapa section`
