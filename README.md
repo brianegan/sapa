@@ -89,6 +89,12 @@ echo 'eval "$(sapa completion zsh)"' >> ~/.zshrc
 sapa never edits your shell config for you — the installer just prints this same
 line for you to copy, paste, and run, the way it hints about `PATH`.
 
+Completion covers each subcommand's arguments too — for example `sapa teardown`
+completes worktree directories and `sapa config --start` completes directories.
+The enable line normally belongs after `compinit` in your `~/.zshrc` (oh-my-zsh
+runs `compinit` for you); if it lands before, the script initialises completion
+itself so Tab still works.
+
 ## Flow
 
 ```sh

@@ -37,6 +37,13 @@ if [ -z "$missing" ]; then ok "covers every subcommand"; else bad "covers every 
 # --- descriptions are scraped, not empty (a distinctive phrase from the help) ---
 if printf '%s' "$out" | grep -q "worktree layout"; then ok "includes scraped descriptions"; else bad "includes scraped descriptions"; fi
 
+# --- argument completion: teardown and config --start complete directories ---
+# (regression for the reported bug: `sapa teardown <TAB>` offered nothing.)
+if printf '%s' "$out" | grep -E 'teardown\)' | grep -q '_files -/'; then ok "teardown completes directories"; else bad "teardown completes directories"; fi
+if printf '%s' "$out" | grep -E 'config\)' | grep -q -- '--start\[.*_files -/'; then ok "config --start completes directories"; else bad "config --start completes directories"; fi
+# The wiring self-heals when the enable line lands before compinit.
+if printf '%s' "$out" | grep -q 'functions\[compdef\]'; then ok "guards compdef wiring behind compinit"; else bad "guards compdef wiring behind compinit"; fi
+
 # --- a missing or unsupported shell is a usage error (exit 2) ---
 out="$("$SAPA" completion 2>&1)"; rc=$?
 if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "usage: sapa completion zsh"; then ok "no shell exits 2 with usage"; else bad "no shell exits 2 with usage (rc=$rc, $out)"; fi
@@ -71,6 +78,27 @@ if command -v zsh >/dev/null 2>&1; then
   watchel="$(printf '%s\n' "$parsed" | sed -n 2p)"
   if [ "$count" = "$nlines" ] && [ "$count" -gt 0 ]; then ok "array parses to one element per command ($count)"; else bad "array parses to one element per command (count=$count, lines=$nlines)"; fi
   if printf '%s' "$watchel" | grep -q "branch's"; then ok "apostrophes in descriptions survive"; else bad "apostrophes in descriptions survive ($watchel)"; fi
+
+  # --- every subcommand dispatches to a real argument-completion branch ---
+  # Stub the completion helpers as recorders, drive _sapa for each command at the
+  # argument position, and confirm each one actually calls a helper (never falls
+  # through the case to silence — the root cause of "Tab doesn't always work").
+  "$SAPA" completion zsh > "$root/_sapa.zsh"
+  cat > "$root/probe.zsh" <<'PROBE'
+CALLS=()
+_describe(){ CALLS+=("$*") }; _values(){ CALLS+=("$*") }
+_arguments(){ CALLS+=("$*") }; _alternative(){ CALLS+=("$*") }
+_files(){ CALLS+=("$*") }
+compdef(){ : }; autoload(){ : }; compinit(){ : }
+source "$SRC"
+for c in bootstrap worktree start config section watch teardown install completion; do
+  words=(sapa "$c" ""); CURRENT=3; CALLS=()
+  _sapa
+  (( ${#CALLS} )) && print -r -- "$c ok" || print -r -- "$c MISSING"
+done
+PROBE
+  probeout="$(SRC="$root/_sapa.zsh" zsh "$root/probe.zsh")"
+  if ! printf '%s' "$probeout" | grep -q MISSING; then ok "every subcommand has an argument-completion branch"; else bad "every subcommand has an argument-completion branch ($(printf '%s' "$probeout" | grep MISSING))"; fi
 else
   echo "skip zsh -n / parse checks (zsh not installed)"
 fi
