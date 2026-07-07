@@ -38,8 +38,12 @@ if [ -z "$missing" ]; then ok "covers every subcommand"; else bad "covers every 
 if printf '%s' "$out" | grep -q "worktree layout"; then ok "includes scraped descriptions"; else bad "includes scraped descriptions"; fi
 
 # --- argument completion: teardown and config --start complete directories ---
-# (regression for the reported bug: `sapa teardown <TAB>` offered nothing.)
-if printf '%s' "$out" | grep -E 'teardown\)' | grep -q '_files -/'; then ok "teardown completes directories"; else bad "teardown completes directories"; fi
+# (regression for the reported bug: `sapa teardown <TAB>` offered `--force`
+# instead of directories. The branch now completes directories on a blank word
+# and only offers the options when the current word is dash-prefixed.)
+teardown_branch="$(printf '%s' "$out" | awk '/^    teardown\)/{f=1} f{print} f&&/;;/{exit}')"
+if printf '%s' "$teardown_branch" | grep -q '_files -/'; then ok "teardown completes directories"; else bad "teardown completes directories"; fi
+if printf '%s' "$teardown_branch" | grep -q 'words\[CURRENT\]} == -\*'; then ok "teardown gates options behind a dash prefix"; else bad "teardown gates options behind a dash prefix"; fi
 if printf '%s' "$out" | grep -E 'config\)' | grep -q -- '--start\[.*_files -/'; then ok "config --start completes directories"; else bad "config --start completes directories"; fi
 # The wiring self-heals when the enable line lands before compinit.
 if printf '%s' "$out" | grep -q 'functions\[compdef\]'; then ok "guards compdef wiring behind compinit"; else bad "guards compdef wiring behind compinit"; fi
