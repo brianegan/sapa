@@ -30,17 +30,39 @@ the event type.
 
 - `ci-failed	<checks>` — CI is failing. Read the failing job (`gh pr checks
   <N>`), fix the cause in the working tree, commit, and push.
-- `new-review	<id> <author> <state>` / `new-comment	<id> <author>` — a review
-  or comment landed. Read it (`gh pr view <N> --comments`) and decide:
-  - Mechanical (rename, typo, obvious small fix): make the change, push, and
-    reply that it is done.
-  - Subjective or a judgement call: do not guess. Escalate to the user through
-    the notification hook so clicking it opens this window, and wait.
-  - If it changes the approach, refresh the plan comment on the issue by running
-    `/sapa-plan` step 4's flow in full (find the `sapa:plan` comment, feed its
-    body through `sapa section plan`, patch in place). `sapa section` refuses a
-    damaged read on its own, so there is no guard to hand-roll here. If that
-    comment is locked or edited, leave it. Never touch the issue body.
+- `new-review	<id> <author> <state> <self|other>` /
+  `new-comment	<id> <author> <self|other>` — a review or comment landed. The
+  trailing marker says who wrote it: `self` is you (the authenticated gh user,
+  this stream's developer), `other` is anyone else. Read it
+  (`gh pr view <N> --comments`) and route on the marker:
+  - **`self`** — your own comment on your own PR. Do **not** reply on GitHub (not
+    the PR, not the issue): a public reply to yourself is noise. Instead surface
+    its content here and escalate through the notification hook so clicking it
+    opens this window, then handle it in the chat. GitHub is not the reply
+    surface for your own words; this session is.
+  - **`other`** — a colleague. Decide:
+    - Mechanical (rename, typo, obvious small fix): make the change, push, and
+      reply on GitHub that it is done.
+    - Subjective or a judgement call: do not guess. Escalate to the user through
+      the notification hook so clicking it opens this window, and wait.
+
+    Any reply you post to an `other` comment goes out under your gh account, so
+    lead it with an attribution line so the colleague knows it is your agent, not
+    you typing:
+
+    ```
+    🤖 _Sapa Workflow, on @<your-login>'s behalf:_
+
+    <the reply>
+    ```
+
+    `<your-login>` is the authenticated gh user (`gh api user --jq .login`).
+  - Either marker: if it changes the approach, refresh the plan comment on the
+    issue by running `/sapa-plan` step 4's flow in full (find the `sapa:plan`
+    comment, feed its body through `sapa section plan`, patch in place). `sapa
+    section` refuses a damaged read on its own, so there is no guard to hand-roll
+    here. If that comment is locked or edited, leave it. Never touch the issue
+    body.
 - `base-behind` — the base branch moved and branch protection needs the branch
   up to date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it
   rebases onto `<remote>/<base>` and re-runs the checks), then push. If it is not
@@ -54,8 +76,9 @@ acting on an event will not make it fire again.
 
 If the PR was opened as a draft, the user may promote it to ready whenever they
 choose; keep watching across that transition. (When it shipped ready there is
-nothing to promote.) Their comments and colleagues' comments flow through the
-same path.
+nothing to promote.) Your own comments and colleagues' comments split by the
+`self`/`other` marker above: yours are handled here in the chat, theirs on
+GitHub with Sapa Workflow attribution.
 
 ## Teardown on merge
 

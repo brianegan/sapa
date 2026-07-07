@@ -90,7 +90,8 @@ me through my existing notification hook, which opens the right window on click.
 17. As a developer, I want a trivially-moved `main` rebased automatically, so that branch-protection "must be up to date" rules do not block me by hand.
 18. As a developer, I want the gate re-run after an automatic rebase, so that a clean merge that breaks the build is caught before it is called green.
 19. As a developer, I want to promote a draft PR to ready when I decide it is ready, so that I control when colleagues are invited to review.
-20. As a developer, I want my own review comments and my colleagues' comments to flow through the same pipe, so that GitHub is the single review surface regardless of who is commenting.
+20. As a developer, I want my own comments on my own PR brought back to me in the coding-agent chat rather than answered on GitHub, so that I am not publicly replying to myself and the conversation with my agent stays where I am working.
+20a. As a developer, I want my colleagues' comments answered on GitHub with a note that the reply came from the Sapa Workflow, so that GitHub stays the review surface for colleagues and they can tell my agent apart from me since it can only post under my account.
 21. As a developer, I want to run three to five streams at once, each in its own window, so that I can context-switch without being blocked.
 22. As a developer, I want each stream to watch its own PR independently, so that no single supervisor process can become a bottleneck or a single point of failure.
 23. As a developer, I want to close a window and know that stream's watch is gone, so that the OS owns process lifecycle and there is no hidden state.
@@ -218,9 +219,18 @@ me through my existing notification hook, which opens the right window on click.
   branch and detects a moved base from `gh`'s `mergeStateStatus`, so config has no
   mechanical consumer here. The `sapa-watch` skill still reads them for the fixes
   it pushes and the rebase-and-gate it triggers.)
-- **Comment classification.** The watcher distinguishes mechanical comments (it
-  fixes and pushes) from subjective comments (it escalates). The exact boundary
-  is an open decision.
+- **Comment classification.** Two axes. First, by author: the `sapa watch`
+  helper tags every new review/comment `self` (the authenticated gh user) or
+  `other` (anyone else), resolving the viewer login once via `gh api user` and
+  failing safe to `self` when it can't — a wrong `self` keeps the response
+  private in the chat, a wrong `other` would post the public reply-to-yourself
+  we are avoiding. A `self` comment is answered in the coding-agent chat and
+  never on GitHub; an `other` comment is answered on GitHub, and any such reply
+  leads with a "Sapa Workflow, on @<login>'s behalf" attribution line because it
+  posts under the developer's account. Second, for `other` comments only, by
+  substance: the watcher distinguishes mechanical comments (it fixes and pushes)
+  from subjective comments (it escalates). The exact mechanical/subjective
+  boundary is an open decision.
 - **Trivial-merge policy.** A moved `main` is auto-rebased only when the merge is
   trivial, and the gate is always re-run afterward before the PR is considered
   green. The precise definition of "trivial" is an open decision.
