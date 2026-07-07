@@ -33,6 +33,30 @@ def run(marker, content, body, lock=False):
         return p.stdout, p.stderr.strip()
 
 
+def run_raw(marker, content, body):
+    """Invoke sapa-section without asserting success; return the CompletedProcess."""
+    with tempfile.TemporaryDirectory() as d:
+        cpath = os.path.join(d, "content")
+        bpath = os.path.join(d, "body")
+        with open(cpath, "w") as f:
+            f.write(content)
+        with open(bpath, "w") as f:
+            f.write(body)
+        cmd = [sys.executable, SECTION, marker, "--content-file", cpath,
+               "--body-file", bpath]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def run_check(marker, body):
+    """Invoke sapa-section --check; return the CompletedProcess."""
+    with tempfile.TemporaryDirectory() as d:
+        bpath = os.path.join(d, "body")
+        with open(bpath, "w") as f:
+            f.write(body)
+        cmd = [sys.executable, SECTION, marker, "--check", "--body-file", bpath]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+
 CASES = []
 
 
@@ -101,6 +125,80 @@ def test_idempotent_update_is_stable():
     assert status == "updated", status
     # Re-writing identical content leaves the managed block identical.
     assert first == second
+
+
+@case
+def test_refuses_truncated_read_open_without_close():
+    # A read cut off mid-section: the opening marker survives, the close is gone.
+    full, _ = run("plan", "The plan.", "# Issue\n")
+    truncated = full[: full.index("<!-- /sapa:plan -->")]
+    p = run_raw("plan", "New plan.", truncated)
+    assert p.returncode == 3, p.returncode
+    assert p.stdout == "", p.stdout
+    assert "damaged" in p.stderr and "sapa:plan" in p.stderr
+
+
+@case
+def test_refuses_stray_closing_marker():
+    p = run_raw("plan", "New plan.", "# Issue\n\n<!-- /sapa:plan -->\n")
+    assert p.returncode == 3, p.returncode
+    assert p.stdout == ""
+
+
+@case
+def test_refuses_duplicate_sections():
+    once, _ = run("plan", "First.", "# Issue\n")
+    twice = once + "\n\n" + once
+    p = run_raw("plan", "New plan.", twice)
+    assert p.returncode == 3, p.returncode
+    assert p.stdout == ""
+
+
+@case
+def test_inline_marker_mention_is_not_a_wrapper():
+    # A plan that quotes the marker inline (in backticks) is prose, not a
+    # wrapper line, so writing a fresh section into it must still succeed.
+    body = "# Issue\n\nThe plan mentions `<!-- sapa:plan -->` in a sentence.\n"
+    out, status = run("plan", "The plan.", body)
+    assert status == "created", status
+    assert out.count("<!-- /sapa:plan -->") == 1
+
+
+@case
+def test_check_passes_on_whole_body():
+    full, _ = run("plan", "The plan.", "# Issue\n")
+    p = run_check("plan", full)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout == "", p.stdout
+
+
+@case
+def test_check_fails_on_truncated_body():
+    full, _ = run("plan", "The plan.", "# Issue\n")
+    truncated = full[: full.index("<!-- /sapa:plan -->")]
+    p = run_check("plan", truncated)
+    assert p.returncode == 3, p.returncode
+    assert p.stdout == ""
+
+
+@case
+def test_check_passes_when_no_section_present():
+    p = run_check("plan", "# Issue\n\nJust a description.\n")
+    assert p.returncode == 0, p.stderr
+
+
+@case
+def test_sibling_marker_is_not_mistaken_for_this_one():
+    # A body that holds only a `plan-extra` block is sound for marker `plan`:
+    # the prefix must not be miscounted as a `plan` opening.
+    extra, _ = run("plan-extra", "Other block.", "# Issue\n")
+    p = run_check("plan", extra)
+    assert p.returncode == 0, p.stderr
+    # And writing a plan section into it still succeeds, leaving both intact.
+    out, status = run("plan", "The plan.", extra)
+    assert status == "created", status
+    assert out.count("<!-- /sapa:plan-extra -->") == 1
+    assert out.count("<!-- /sapa:plan -->") == 1
 
 
 def main():

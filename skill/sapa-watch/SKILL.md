@@ -37,13 +37,10 @@ the event type.
   - Subjective or a judgement call: do not guess. Escalate to the user through
     the notification hook so clicking it opens this window, and wait.
   - If it changes the approach, refresh the plan comment on the issue by running
-    `/sapa-plan` step 4's flow in full: find the `sapa:plan` comment, read its
-    body untruncated with `gh api .../issues/comments/<id> --jq .body`, apply the
-    same truncation guard (a `<!-- sapa:plan hash=… -->` or
-    `<!-- sapa:plan locked -->` wrapper line with no matching `<!-- /sapa:plan -->`
-    close → stop, do not patch; a marker quoted inline in prose does not count),
-    then run it through `sapa section plan` and patch it in place. If that comment
-    is locked or edited, leave it. Never touch the issue body.
+    `/sapa-plan` step 4's flow in full (find the `sapa:plan` comment, feed its
+    body through `sapa section plan`, patch in place). `sapa section` refuses a
+    damaged read on its own, so there is no guard to hand-roll here. If that
+    comment is locked or edited, leave it. Never touch the issue body.
 - `base-behind` — the base branch moved and branch protection needs the branch
   up to date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it
   rebases onto `<remote>/<base>` and re-runs the checks), then push. If it is not

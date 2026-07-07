@@ -10,10 +10,9 @@ reconcile the plan comment on the issue. Assumes the branch is already green and
 rebased onto the base — run `/sapa-gate` first, or let `/sapa-flow` do it. Does
 not gate — that is `/sapa-gate`.
 
-Rules (always): the configured remote (default `origin`) is the only remote — its
-name is configurable but there is never a second one; GitHub goes through `gh`;
-never clobber human text (the PR body and issue plan are written with
-`sapa section`).
+Rules (always): the configured remote (default `origin`) is the only remote;
+GitHub goes through `gh`; never clobber human text (the PR body and issue plan
+are written with `sapa section`).
 
 ## Step 1 — Locate the config
 
@@ -71,20 +70,16 @@ Run `sapa config -p` and read these top-level keys (all optional):
 
    ```
    gh pr view <N> --json body --jq .body > /tmp/sapa-pr-existing.md
+   sapa section pr-description --content-file /tmp/sapa-pr.md --body-file /tmp/sapa-pr-existing.md > /tmp/sapa-pr-body.md
    ```
 
-   Guard first: the read is damaged only if a wrapper opening line —
-   `<!-- sapa:pr-description hash=… -->` or `<!-- sapa:pr-description locked -->`
-   alone on its own line, as `sapa section` emits it — appears without its matching
-   `<!-- /sapa:pr-description -->` closing line. A marker quoted inline in prose (in
-   backticks, whatever its shape) is not a wrapper line and does not count; a PR
-   body may mention the marker, so match the emitted line, not the string. If
-   damaged, stop and report; do not edit, or you would append a duplicate section.
-   Otherwise pipe through
-   `sapa section pr-description --body-file /tmp/sapa-pr-existing.md` and
-   `gh pr edit <N> --body-file` only if the status is `created`/`updated`. If
-   `locked`/`locked-edited`, leave the body alone. Either way, note the URL for
-   the summary with `gh pr view <N> --json url --jq .url`.
+   `sapa section` exits non-zero (nothing on stdout) if that body is damaged — a
+   truncated read missing its closing marker, which editing would duplicate. If
+   it errors, stop and report; re-read the body in full rather than edit.
+   Otherwise run `gh pr edit <N> --body-file /tmp/sapa-pr-body.md` only if the
+   status is `created`/`updated`. If `locked`/`locked-edited`, leave the body
+   alone. Either way, note the URL for the summary with
+   `gh pr view <N> --json url --jq .url`.
 
 ## Step 3 — Reconcile the plan
 

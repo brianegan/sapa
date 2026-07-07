@@ -11,8 +11,8 @@ merge: no false green against a stale base, and no branch-protection "must be up
 to date" surprise at merge time. Does not push or open a PR — that is
 `/sapa-submit`.
 
-Rules (always): the configured remote (default `origin`) is the only remote — its
-name is configurable but there is never a second one; GitHub goes through `gh`.
+Rules (always): the configured remote (default `origin`) is the only remote;
+GitHub goes through `gh`.
 
 ## Step 1 — Locate the config
 

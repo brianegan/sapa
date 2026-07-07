@@ -23,12 +23,22 @@ The `hash` is a checksum of the content Sapa last wrote. On update:
 The updated body is printed to stdout. A one-word status is printed to stderr:
 `created`, `updated`, `locked-now`, `locked-edited`, or `locked`.
 
+If the body is damaged — a wrapper line without its matching partner, or more
+than one managed block for the marker — the tool refuses: it writes nothing to
+stdout, reports the damage on stderr, and exits 3. This is the case a truncated
+read produces (an opening `<!-- sapa:MARKER ... -->` survives without its
+closing `<!-- /sapa:MARKER -->`); appending to it would duplicate the section,
+so the caller must stop and re-read the body in full instead.
+
 Usage:
     sapa-section MARKER --content-file NEW [--body-file BODY] [--lock]
+    sapa-section MARKER --check [--body-file BODY]
 
 If --body-file is omitted the body is read from stdin. With --lock the section
 is written (or rewritten, if Sapa still owns it) as locked so it is never
-touched again.
+touched again. With --check the tool only validates the body's markers — exit 0
+if sound, 3 if damaged — and writes nothing to stdout; a reader uses it to
+confirm a fetched body was not truncated before consuming it.
 """
 
 import argparse
@@ -50,6 +60,34 @@ def build_section(marker: str, content: str, locked: bool) -> str:
     return f"{head}\n{content}\n<!-- /sapa:{marker} -->"
 
 
+def check_damage(body: str, marker: str) -> str:
+    """Return an error message if the body's wrapper lines are unsound, else "".
+
+    A sound body has either no wrapper lines at all, or exactly one opening line
+    paired with exactly one closing line. Anything else — an opening with no
+    close (the shape a truncated read produces), a stray close, or duplicate
+    blocks — is damaged, and appending to it would corrupt the body. Wrapper
+    lines are matched only when they stand alone on their own line, as the tool
+    emits them; a marker quoted inline in prose (backticks and all) is text, not
+    a wrapper, and does not count.
+    """
+    m = re.escape(marker)
+    # A space after the marker, as build_section always emits, so a sibling
+    # marker sharing this one's prefix (sapa:plan-extra vs sapa:plan) is not
+    # miscounted as an opening — the close pattern is already this strict.
+    opens = len(re.findall(r"^<!-- sapa:" + m + r" [^>]*-->$", body, re.MULTILINE))
+    closes = len(re.findall(r"^<!-- /sapa:" + m + r" -->$", body, re.MULTILINE))
+    if opens == 0 and closes == 0:
+        return ""
+    if opens == 1 and closes == 1:
+        return ""
+    return (
+        f"damaged sapa:{marker} section: found {opens} opening and {closes} "
+        f"closing marker line(s), expected a matched pair. The body may have "
+        f"been truncated on read; re-read it in full before writing."
+    )
+
+
 def find_section(body: str, marker: str):
     """Return (match, start_attrs, inner) or (None, None, None)."""
     pattern = re.compile(
@@ -67,19 +105,35 @@ def find_section(body: str, marker: str):
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("marker")
-    parser.add_argument("--content-file", required=True)
+    parser.add_argument("--content-file")
     parser.add_argument("--body-file")
     parser.add_argument("--lock", action="store_true")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="validate the body's markers and exit (0 sound, 3 damaged); "
+             "write nothing. For readers confirming a fetch was not truncated.")
     args = parser.parse_args()
 
-    with open(args.content_file, "r", encoding="utf-8") as f:
-        new_content = f.read()
+    if not args.check and not args.content_file:
+        parser.error("--content-file is required unless --check is given")
 
     if args.body_file:
         with open(args.body_file, "r", encoding="utf-8") as f:
             body = f.read()
     else:
         body = sys.stdin.read()
+
+    damage = check_damage(body, args.marker)
+    if damage:
+        sys.stderr.write(damage + "\n")
+        return 3
+
+    if args.check:
+        sys.stderr.write("ok\n")
+        return 0
+
+    with open(args.content_file, "r", encoding="utf-8") as f:
+        new_content = f.read()
 
     match, attrs, inner = find_section(body, args.marker)
 

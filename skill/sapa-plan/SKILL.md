@@ -54,20 +54,13 @@ locked.
 
      ```
      gh api /repos/{owner}/{repo}/issues/comments/<id> --jq .body > /tmp/sapa-existing.md
-     ```
-
-     Guard before touching it: the read is damaged only if a wrapper opening line
-     — `<!-- sapa:plan hash=… -->` or `<!-- sapa:plan locked -->` alone on its own
-     line, as `sapa section` emits it — appears without its matching
-     `<!-- /sapa:plan -->` closing line. A marker quoted inline in prose (in
-     backticks, whatever its shape) is not a wrapper line and does not count; a
-     recorded plan may mention the marker, so match the emitted line, not the
-     string. If damaged, stop, report it, and do not run `sapa section` or patch;
-     patching now would append a duplicate section. Otherwise continue:
-
-     ```
      sapa section plan --content-file /tmp/sapa-plan.md --body-file /tmp/sapa-existing.md > /tmp/sapa-comment.md
      ```
+
+     `sapa section` exits non-zero (status 3, nothing on stdout) if that body is
+     damaged — a truncated read that kept an opening marker but lost its close,
+     which patching would turn into a duplicate section. If it errors, stop and
+     report; re-read the body in full rather than patch. Otherwise:
 
      If `updated`, patch that same comment in place — do not post a new one.
      `-F body=@file` sends the body from the file, avoiding shell-escaping and
