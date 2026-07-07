@@ -56,6 +56,10 @@ fi
 out="$("$SAPA" watch --help 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa watch"; then ok "routes to watch"; else bad "routes to watch (rc=$rc, $out)"; fi
 
+# --- routing: uninstall reaches its own helper (subhelp is a network-free probe) ---
+out="$("$SAPA" uninstall --help 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa uninstall"; then ok "routes to uninstall"; else bad "routes to uninstall (rc=$rc, $out)"; fi
+
 # --- subhelp: `sapa <cmd> --help` shows that command's own help ---
 out="$("$SAPA" config --help 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa config"; then ok "config --help shows subcommand help"; else bad "config --help shows subcommand help (rc=$rc)"; fi

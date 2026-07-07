@@ -20,11 +20,12 @@
 #   watch       poll the current branch's PR and emit one line per change
 #   teardown    remove a merged stream's worktree and local branch
 #   install     link sapa onto PATH and its skills into your agents
+#   uninstall   remove the symlinks sapa install created
 #   completion  print a shell completion script (e.g. eval "$(sapa completion zsh)")
 
 set -euo pipefail
 
-commands="bootstrap worktree start config section watch teardown install completion"
+commands="bootstrap worktree start config section watch teardown install uninstall completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 

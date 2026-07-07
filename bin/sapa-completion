@@ -103,7 +103,6 @@ $pairs
         _arguments '::worktree:_files -/'
       fi
       ;;
-    install)    _values 'install action' 'uninstall' ;;
     completion) _values 'shell' 'zsh' ;;
   esac
 }

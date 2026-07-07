@@ -71,19 +71,9 @@ else
   bad "SAPA_AGENTS targets only the named agent (rc=$rc, $out)"
 fi
 
-# --- uninstall removes sapa's links (incl. legacy) but leaves foreign files alone ---
-foreign="$bin_dir/other"
-: > "$foreign"                                  # a regular file that isn't ours
-ln -sfn /somewhere/else "$bin_dir/sapa-worktree"  # a link that isn't ours
-ln -sfn "$clone/bin/sapa-start" "$bin_dir/sapa-start"  # a stale legacy link that IS ours
+# --- install no longer handles uninstall; it points at the new command ---
 out="$(HOME="$home" bash "$INSTALL" uninstall 2>&1)"; rc=$?
-if [ $rc -eq 0 ]; then ok "uninstall exits 0"; else bad "uninstall exits 0 (rc=$rc, $out)"; fi
-if [ ! -e "$bin_dir/sapa" ]; then ok "uninstall removes the sapa link"; else bad "uninstall removes the sapa link"; fi
-if [ ! -e "$bin_dir/sapa-start" ]; then ok "uninstall removes a legacy sapa link"; else bad "uninstall removes a legacy sapa link"; fi
-if [ ! -e "$home/.claude/skills/sapa-plan" ]; then ok "uninstall removes a sapa skill link"; else bad "uninstall removes a sapa skill link"; fi
-if [ -f "$foreign" ]; then ok "uninstall leaves a foreign regular file"; else bad "uninstall leaves a foreign regular file"; fi
-if [ -L "$bin_dir/sapa-worktree" ]; then ok "uninstall leaves a foreign symlink"; else bad "uninstall leaves a foreign symlink"; fi
-if printf '%s' "$out" | grep -q 'sapa completion zsh'; then bad "uninstall does not print the completion hint"; else ok "uninstall does not print the completion hint"; fi
+if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "sapa uninstall"; then ok "install rejects uninstall, points at 'sapa uninstall'"; else bad "install rejects uninstall (rc=$rc, $out)"; fi
 
 # --- --help works ---
 out="$(bash "$INSTALL" --help 2>&1)"; rc=$?

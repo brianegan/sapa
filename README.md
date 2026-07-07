@@ -56,8 +56,8 @@ Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 Clone the repo, then run the installer from it:
 
 ```sh
-bin/sapa install            # link sapa onto PATH, skills into your agents
-bin/sapa install uninstall  # remove those symlinks
+bin/sapa install    # link sapa onto PATH, skills into your agents
+sapa uninstall      # remove those symlinks
 ```
 
 It symlinks the `sapa` command into `~/.local/bin` and the `skill/` directories

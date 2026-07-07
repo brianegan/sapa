@@ -1,0 +1,47 @@
+#!/bin/bash
+# sapa uninstall — remove the symlinks sapa install created.
+#
+# Removes the `sapa` link from your PATH directory, any leftover links from the
+# old one-per-command layout, and the skill links from each targeted agent —
+# each only when it is a symlink pointing into sapa, so a regular file or a link
+# you own is never touched. The inverse of `sapa install`; the two share their
+# link inventory so they stay in step.
+#
+# Usage:
+#   sapa uninstall
+#
+# Environment:
+#   SAPA_BIN_DIR   where sapa was linked (default ~/.local/bin).
+#   SAPA_AGENTS    space/comma-separated agents to target (e.g. "claude codex").
+#                  When unset, every agent whose ~/.<agent> directory exists is
+#                  targeted.
+
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "") ;;
+  *) echo "sapa uninstall: unknown argument: $1" >&2
+     echo "usage: sapa uninstall" >&2
+     exit 2 ;;
+esac
+
+# The link inventory (BINS/LEGACY_BINS/SKILLS), the bin_dir, the agents to
+# target, and remove_link — shared with sapa-install so the two can't drift.
+# The dispatcher execs us by path from the clone's bin/ (and we are never linked
+# ourselves), so the common file is a plain sibling — no symlink resolution.
+src_bindir="$(cd "$(dirname "$0")" && pwd)"
+. "$src_bindir/sapa-install-common"
+
+# Remove the sapa link, any leftover legacy links, and the skill links — each
+# only when it is a symlink pointing into sapa.
+for h in $BINS $LEGACY_BINS; do
+  remove_link "$bin_dir/$h" "*/bin/$h"
+done
+for a in $agents; do
+  for s in $SKILLS; do
+    remove_link "$HOME/.$a/skills/$s" "*/skill/$s"
+  done
+done
+
+echo "sapa uninstall: removed $removed links (skipped $skipped not pointing into sapa)"
