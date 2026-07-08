@@ -3,6 +3,14 @@ base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
 plan: grill-with-docs
+# How `sapa watch` decides a branch is behind its base.
+#   protection (default) — only on mergeStateStatus BEHIND, which needs a
+#     "require branches up to date" protection rule.
+#   any — also when the base has genuinely moved ahead without that rule
+#     (via the compare API), at the cost of a rebase + re-gate on every
+#     merge to the base.
+# watch:
+#   base_behind: protection
 gate:
   # A step can invoke a skill...
   - name: review
