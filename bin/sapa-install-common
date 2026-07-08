@@ -41,3 +41,103 @@ remove_link() {
     *) skipped=$((skipped+1)) ;;
   esac
 }
+
+# manage_hooks add|remove — wire (or unwire) the run-state hooks that let the
+# window switcher (Jump) show whether each stream is running, at rest, or waiting.
+# They map Claude Code events to `sapa status --state`: UserPromptSubmit→busy,
+# Notification→needs-you, Stop→idle. `sapa status` self-guards, so these are inert
+# in any non-sapa session. Shared by sapa-install (add) and sapa-uninstall (remove)
+# so the wiring and unwiring can't drift.
+#
+# This is the one place sapa edits a config file rather than printing a hint (the
+# PATH/completion hints stay hints). It is made safe the way remove_link is: it
+# only ever touches entries whose command is ours (matches `sapa status --state`),
+# leaving every other hook the user has untouched. Idempotent on add (re-adds a
+# clean copy, so a moved clone self-heals), exact on remove. python3 does the JSON
+# surgery; if it is missing, or the settings file can't be read or written, we skip
+# the hooks rather than fail the caller.
+manage_hooks() {
+  local action="$1" settings="$2" sapa_abs="$3"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "sapa: python3 not found; skipped run-state status hooks" >&2
+    return 0
+  fi
+  python3 - "$action" "$settings" "$sapa_abs" <<'PY'
+import json, os, sys
+
+action, settings, sapa_abs = sys.argv[1], sys.argv[2], sys.argv[3]
+EVENTS = {"UserPromptSubmit": "busy", "Notification": "needs-you", "Stop": "idle"}
+MARK = "status --state"  # the signature that identifies a hook command as ours
+
+def is_ours(cmd):
+    return isinstance(cmd, str) and "sapa" in cmd and MARK in cmd
+
+existed = os.path.exists(settings)
+if not existed and action == "remove":
+    sys.exit(0)  # nothing to remove and never create a file just to prune it
+
+data = {}
+if existed:
+    try:
+        with open(settings) as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            data = loaded
+    except (OSError, ValueError) as e:
+        # Unreadable or non-JSON (incl. a settings that is somehow a directory):
+        # skip the hooks rather than proceed and risk clobbering, and rather than
+        # abort the caller.
+        print("sapa: could not read %s (%s); skipped status hooks" % (settings, e),
+              file=sys.stderr)
+        sys.exit(0)
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+
+def strip_ours(event):
+    groups = hooks.get(event)
+    if not isinstance(groups, list):
+        return
+    kept = []
+    for g in groups:
+        if isinstance(g, dict) and isinstance(g.get("hooks"), list):
+            g["hooks"] = [h for h in g["hooks"]
+                          if not (isinstance(h, dict) and is_ours(h.get("command")))]
+            if g["hooks"]:
+                kept.append(g)
+        else:
+            kept.append(g)
+    if kept:
+        hooks[event] = kept
+    else:
+        hooks.pop(event, None)
+
+for event, state in EVENTS.items():
+    strip_ours(event)  # remove any prior copy of ours first (idempotent add, exact remove)
+    if action == "add":
+        hooks.setdefault(event, []).append(
+            {"hooks": [{"type": "command",
+                        "command": "%s status --state %s" % (sapa_abs, state)}]}
+        )
+
+if hooks:
+    data["hooks"] = hooks
+else:
+    data.pop("hooks", None)
+
+try:
+    os.makedirs(os.path.dirname(settings) or ".", exist_ok=True)
+    tmp = settings + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, settings)
+except OSError as e:
+    # Honour the "skip the hooks rather than fail" promise: a write failure (e.g. a
+    # read-only ~/.claude) must not abort the caller. Warn and move on.
+    print("sapa: could not write %s: %s; skipped status hooks" % (settings, e),
+          file=sys.stderr)
+    sys.exit(0)
+PY
+}

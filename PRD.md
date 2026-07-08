@@ -122,6 +122,10 @@ me through my existing notification hook, which opens the right window on click.
 48. As a developer, I want submit's ship summary to lead with the clickable PR URL, so that I can open the PR in my browser for a quick review before watch takes over.
 49. As a developer, I want a single `sapa-flow` command that carries a stream from its issue through plan, build, gate, PR, and watch, so that I do not manually kick off each phase, while every phase skill stays runnable on its own when I want just that step.
 50. As a developer, I want the gate to integrate my branch's own remote head before rebasing onto the base, so that a teammate's commits pushed to the same branch are not lost when submit later force-pushes.
+51. As a developer running three to five streams at once, I want to see at a glance which windows are running, at rest, or waiting on me, so that I know which one I can safely switch to without opening each.
+52. As a developer, I want that status to also carry which lifecycle stage each stream is in, so that "watching, idle, waiting on CI" reads differently from "done".
+53. As a developer, I want sapa to only *emit* the status and leave rendering to my own window switcher, so that sapa stays a local producer with no hosted UI or supervisor process.
+54. As a developer, I want the status hooks to be inert in my non-sapa sessions and removable, so that opting into this never pollutes unrelated work or my global config permanently.
 
 ## Implementation Decisions
 
@@ -267,6 +271,33 @@ me through my existing notification hook, which opens the right window on click.
   (wingspan `/plan`, `/grill-with-docs`) to run the discussion, but the
   record-to-issue-comment step always runs, since that durable capture — not the
   dialogue style — is sapa's contribution.
+- **Window-switcher status (#51).** Sapa emits each stream's status so an external
+  window switcher (reference consumer: Jump) can badge every window as running, at
+  rest, or waiting — the cross-stream visibility the "concurrency by windows" model
+  otherwise leaves to the eye. `sapa status` writes one JSON file per stream to a
+  global registry (`${SAPA_STATUS_DIR:-~/.sapa/status}/<basename>.json`), keyed by
+  the worktree basename — which equals the branch and is the token an editor puts in
+  its window title, the join a switcher matches on. One file per stream so each
+  window only writes its own (no cross-window contention) and teardown removes just
+  that file. The file carries two orthogonal fields written by whoever knows each:
+  `state` (`busy`/`idle`/`needs-you`, the run-state) and `stage`
+  (`plan`/`build`/`gate`/`submit`/`watch`, the lifecycle phase). They are merged
+  with an atomic read-modify-write (tmp + `os.replace`, as `sapa watch`) so the two
+  writers never clobber each other. The producer/consumer split is deliberate: sapa
+  owns writing the status; rendering stays in the switcher, keeping sapa a local
+  producer with no hosted UI. Run-state comes from Claude Code hooks
+  (`UserPromptSubmit → busy`, `Notification → needs-you`, `Stop → idle`) because
+  hooks fire deterministically regardless of what the agent is doing; stage comes
+  from the phase skills. `sapa install` wires those hooks into
+  `~/.claude/settings.json` — the one config file sapa edits rather than hinting at,
+  justified because reliable run-state is only available through hooks. It is made
+  safe the way the symlink installer is: idempotent, reversible (`sapa uninstall`
+  removes exactly its own entries), and it touches only entries it
+  recognizes as its own, never the user's other hooks. `sapa status` self-guards by
+  walking up for the `.bare` root, so the global hooks are inert in non-sapa
+  sessions. Only the sapa (producer) side is in this change; the Jump (consumer)
+  side — matching a window to a stream by title and rendering the badge — is a
+  separate change in that repo, built against this contract.
 
 ## Testing Decisions
 
@@ -289,10 +320,14 @@ me through my existing notification hook, which opens the right window on click.
   ownership-lock logic for both PR body and issue plan), `sapa watch` (the poll
   emitter: the empty/failed-fetch guard, dedup against last-seen state, each event
   type, and terminal-state exit, with `gh` stubbed on PATH), `sapa start`
-  (issue-to-branch-name derivation), `sapa teardown` (clean-guarded worktree
-  removal), and `sapa bootstrap` (the `init` path builds the `.bare` + `main`
-  layout offline), plus the `sapa` dispatcher itself (routing, help, unknown
-  commands). The remaining agent-driven parts (opening the PR, fixing CI,
+  (issue-to-branch-name derivation), `sapa status` (keyed write to the registry,
+  state/stage merge without clobber, the self-guard outside a sapa stream, and
+  `--clear`), `sapa teardown` (clean-guarded worktree removal), and `sapa
+  bootstrap` (the `init` path builds the `.bare` + `main` layout offline), plus the
+  `sapa` dispatcher itself (routing, help, unknown commands). `sapa install`'s hook
+  merge is covered too: it wires the three run-state hooks idempotently and
+  `uninstall` removes only its own, tested against a seeded `settings.json` under a
+  sandboxed `HOME`. The remaining agent-driven parts (opening the PR, fixing CI,
   classifying comments) are verified by observation, not unit tests, as is
   `sapa worktree` (it fetches `origin` and opens an editor).
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
@@ -302,8 +337,12 @@ me through my existing notification hook, which opens the right window on click.
 ## Out of Scope
 
 - A git proxy remote or any second remote. `origin` only, always.
-- A cross-stream dashboard or mission-control view. Status lives per window in
-  v1; a dashboard is a possible v2.
+- A cross-stream mission-control view or supervisor UI. Status still lives per
+  window — but as of #51 sapa *emits* a per-stream status (`sapa status`) that an
+  external window switcher reads to badge each window (see "Window-switcher
+  status" below). That is the v2 the "possible v2" note anticipated: a producer
+  sapa owns, not a dashboard sapa hosts. A hosted mission-control view remains out
+  of scope.
 - A Codex (or any cross-model) reviewer in v1. Designed for, deferred.
 - Any always-on hosted process. The tool is local; the developer keeps the
   machine awake with caffeinate when work should continue during a break.

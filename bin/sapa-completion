@@ -92,6 +92,7 @@ $pairs
     start)      _arguments '--title[skip the gh lookup]:title: ' '--print[print the branch, do not run sapa worktree]' '--start[start point]:start-point:__sapa_git_refs' ':issue number: ' '::start-point:__sapa_git_refs' ;;
     config)     _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/' ;;
     section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
+    status)     _arguments '--state[run-state]:state:(busy idle needs-you)' '--stage[lifecycle stage]:stage:(plan build gate submit watch)' '--clear[remove this stream'\''s status file]' '--start[resolve the stream from here]:directory:_files -/' ;;
     watch)      _arguments '--once[single poll, then exit]' '--state-file[last-seen state file]:file:_files' '--start[locate the git dir from here]:directory:_files -/' ;;
     teardown)
       # Priority: a blank word completes directories (the common case, picking a

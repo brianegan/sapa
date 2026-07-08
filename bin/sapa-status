@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""sapa status — record the current stream's status for the window switcher.
+
+sapa runs one editor window per stream. This writes a tiny JSON file per stream
+to a global registry so a switcher (Jump) can show, at a glance across windows,
+which streams are running, at rest, or need me. It is the producer half of the
+Jump integration (issue #51); Jump reads the registry and renders a badge.
+
+Two orthogonal fields, each written by whoever knows it:
+
+    state   busy | idle | needs-you    the run-state, written by Claude Code hooks
+    stage   plan | build | gate | submit | watch   the lifecycle phase, by the skills
+
+They are written independently and merged: `--state` never clobbers `stage` and
+vice versa, so the frequent run-state hook and the once-per-phase skill call can
+race without losing each other's field (atomic tmp + os.replace, as sapa-watch).
+
+Registry layout (one file per stream, so each window only ever writes its own —
+no cross-window contention, and teardown removes just that file):
+
+    ${SAPA_STATUS_DIR:-~/.sapa/status}/<worktree-basename>.json
+
+keyed by the worktree basename, which equals the branch and is the token an
+editor puts in its window title — the join Jump matches windows on. Each file:
+
+    { "branch": "<branch>", "stage": "<stage>", "state": "<state>",
+      "updated": "<UTC ISO-8601>" }
+
+Self-guarding: the run-state hooks fire in *every* Claude session, not just sapa
+ones. This resolves the stream by walking up for a `.bare` project root (the sapa
+worktree layout); outside a sapa stream it does nothing and exits 0, so the global
+hooks are harmless everywhere else.
+
+Usage:
+    sapa status --state busy|idle|needs-you   # set the run-state
+    sapa status --stage plan|build|gate|submit|watch   # set the lifecycle stage
+    sapa status --clear                        # remove this stream's file
+    sapa status --start DIR                    # resolve the stream from DIR (default: $PWD)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+STATES = ["busy", "idle", "needs-you"]
+STAGES = ["plan", "build", "gate", "submit", "watch"]
+
+
+def find_stream(start: str):
+    """Resolve (worktree_path, basename) for the sapa stream containing `start`.
+
+    Walks up for the `.bare` project root, then takes the path component directly
+    below it as the stream's worktree. Returns (None, None) when `start` is not
+    inside a sapa worktree — including when it is the project root itself.
+    """
+    d = os.path.abspath(start)
+    project_root = None
+    cur = d
+    while True:
+        if os.path.isdir(os.path.join(cur, ".bare")):
+            project_root = cur
+            break
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return (None, None)
+        cur = parent
+    rel = os.path.relpath(d, project_root)
+    if rel in (".", ""):
+        return (None, None)
+    first = rel.split(os.sep)[0]
+    if first in ("", ".", ".."):
+        return (None, None)
+    return (os.path.join(project_root, first), first)
+
+
+def registry_dir() -> str:
+    return os.environ.get("SAPA_STATUS_DIR") or os.path.expanduser("~/.sapa/status")
+
+
+def branch_of(worktree: str, fallback: str) -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", worktree, "branch", "--show-current"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True,
+        ).stdout.strip()
+        return out or fallback
+    except (OSError, subprocess.CalledProcessError):
+        return fallback
+
+
+def load(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save(path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog="sapa status", add_help=True, description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--state", choices=STATES)
+    p.add_argument("--stage", choices=STAGES)
+    p.add_argument("--clear", action="store_true")
+    p.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
+    args = p.parse_args(argv)
+
+    if not (args.state or args.stage or args.clear):
+        p.error("nothing to do: pass --state, --stage, or --clear")
+
+    worktree, basename = find_stream(args.start)
+    if not basename:
+        # Not a sapa stream (e.g. a hook firing in some other repo): do nothing.
+        return 0
+
+    path = os.path.join(registry_dir(), basename + ".json")
+
+    if args.clear:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"sapa status: could not remove {path}: {e}", file=sys.stderr)
+        return 0
+
+    data = load(path)
+    data["branch"] = branch_of(worktree, basename)
+    if args.state:
+        data["state"] = args.state
+    if args.stage:
+        data["stage"] = args.stage
+    data["updated"] = now()
+    try:
+        save(path, data)
+    except OSError as e:
+        # Never fail the caller (a hook must not break the session) — warn and move on.
+        print(f"sapa status: could not write {path}: {e}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

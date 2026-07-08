@@ -42,6 +42,8 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   `sapa worktree` finds `.bare`.
 - `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
+- `sapa status` — record the current stream's run-state and lifecycle stage to a
+  per-stream JSON file a window switcher can read (see [Window status](#window-status)).
 - `sapa watch` — poll the current branch's PR and emit one structured line per
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`), guarding empty or failed fetches and deduping against the
@@ -68,6 +70,12 @@ your `PATH`. The links point into the clone you run it from, so editing the
 source updates the installed copy; develop sapa from your `main` checkout so the
 links track merged code. Re-running is safe (and it clears any links left by the
 older one-command-per-helper layout).
+
+When Claude Code is a target, install also wires three run-state hooks into
+`~/.claude/settings.json` for the [window status](#window-status) feature. This
+is the one config file sapa edits (the `PATH` and completion hints stay hints); it
+touches only its own entries, leaving any hooks you already have, and `sapa
+uninstall` removes exactly them.
 
 Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 `~/.local/bin`; the installer prints a hint if it isn't on your `PATH`), and
@@ -204,6 +212,41 @@ gate:
   - name: test
     run: ./.sapa-verify.sh test
 ```
+
+## Window status
+
+Sapa runs one editor window per stream, so with three to five streams going the
+question is always "which window can I switch to right now?" `sapa status` answers
+it for a window switcher: it writes a tiny JSON file per stream that a switcher
+reads to badge each window as running, at rest, or waiting.
+
+Two orthogonal fields, each written by whoever knows it:
+
+- `state` — the run-state, `busy` | `idle` | `needs-you`, written by the Claude
+  Code hooks `sapa install` wires (`UserPromptSubmit → busy`, `Notification →
+  needs-you`, `Stop → idle`). This is the "running vs at rest" signal.
+- `stage` — the lifecycle phase, `plan` | `build` | `gate` | `submit` | `watch`,
+  written by each phase skill as it runs.
+
+They are written independently and merged, so the frequent run-state hook and the
+once-per-phase stage write never clobber each other. `sapa status` self-guards: it
+resolves the stream by walking up for the `.bare` project root, so the global hooks
+do nothing in any non-sapa session. On merge, `sapa teardown` clears the file.
+
+The registry is one file per stream — so each window only writes its own, and
+teardown removes just that one — under `${SAPA_STATUS_DIR:-~/.sapa/status}/`, keyed
+by the worktree basename (which equals the branch, and is the token an editor puts
+in its window title — the join a switcher matches windows on):
+
+```json
+{ "branch": "51-combine-jump-sapa", "stage": "gate", "state": "busy",
+  "updated": "2026-07-07T22:48:00Z" }
+```
+
+The consumer side — reading this registry and rendering a per-window badge — lives
+in the switcher. [Jump](https://github.com/brianegan/jump) is the reference
+consumer; any tool that can match a window to a stream by title and read the JSON
+can use it.
 
 ## Test
 

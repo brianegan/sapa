@@ -14,6 +14,9 @@ Rules (always): the configured remote (default `origin`) is the only remote;
 GitHub goes through `gh`; never clobber human text (the PR body and issue plan
 are written with `sapa section`).
 
+Before anything else, mark the stream's stage for the window switcher: run `sapa
+status --stage submit` (best-effort — it no-ops outside a sapa stream).
+
 ## Step 1 — Locate the config
 
 Run `sapa config -p` and read these top-level keys (all optional):

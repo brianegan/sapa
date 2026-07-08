@@ -44,4 +44,10 @@ for a in $agents; do
   done
 done
 
+# Unwire the run-state status hooks sapa install added, when claude is a target —
+# removes only our own entries, leaving any other hooks the user has. Best-effort.
+case " $agents " in
+  *" claude "*) manage_hooks remove "$HOME/.claude/settings.json" "$src_bindir/sapa" || true ;;
+esac
+
 echo "sapa uninstall: removed $removed links (skipped $skipped not pointing into sapa)"
