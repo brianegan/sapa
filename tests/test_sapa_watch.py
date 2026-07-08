@@ -271,6 +271,27 @@ def test_base_behind_is_edge_triggered():
 
 
 @case
+def test_base_conflicted_is_edge_triggered():
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    fixture = pr(merge="DIRTY")
+    out, _, after = run_once(fixture, prior_state=prior)
+    assert events(out) == [["base-conflicted"]], out
+    assert after["conflicted"] is True, after
+    # Held-conflicting on the next poll does not re-emit.
+    out2, _, _ = run_once(fixture, prior_state=after)
+    assert events(out2) == [], out2
+
+
+@case
+def test_behind_and_conflicted_are_distinct():
+    # BEHIND still routes to base-behind and never to base-conflicted.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    out, _, after = run_once(pr(merge="BEHIND"), prior_state=prior)
+    assert events(out) == [["base-behind"]], out
+    assert after["conflicted"] is False, after
+
+
+@case
 def test_merged_is_terminal():
     prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False}
     out, _, _ = run_once(pr(state="MERGED"), prior_state=prior)
