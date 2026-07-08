@@ -32,6 +32,15 @@ session. Run it as a background process through Monitor and only wake to act whe
 it emits a line. Each line is one real change: the first tab-separated token is
 the event type.
 
+Before starting it, read `watch.base_behind` from `sapa config -p` (default
+`protection` when the key or the `watch:` map is absent) and pass it as
+`--base-behind <value>`, the same way the gate config threads through: config
+parsing lives here, the helper stays mechanical. `protection` fires `base-behind`
+only when GitHub reports `mergeStateStatus: BEHIND` (which needs an "up to date"
+branch-protection rule); `any` also fires it when the base has genuinely moved
+ahead without that rule, at the cost of a rebase and re-gate on every merge to the
+base.
+
 - `ci-failed	<checks>` — CI is failing. Read the failing job (`gh pr checks
   <N>`), fix the cause in the working tree, commit, and push.
 - `new-review	<id> <author> <state> <self|other>` /
@@ -67,10 +76,11 @@ the event type.
     section` refuses a damaged read on its own, so there is no guard to hand-roll
     here. If that comment is locked or edited, leave it. Never touch the issue
     body.
-- `base-behind` — the base branch moved and branch protection needs the branch
-  up to date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it
-  rebases onto `<remote>/<base>` and re-runs the checks), then push. If it is not
-  trivial, escalate.
+- `base-behind` — the base branch moved ahead: either branch protection needs the
+  branch up to date (`protection` mode), or `any` mode detected the base is ahead
+  on its own. Either way, if the rebase is trivial (no conflicts), invoke
+  `/sapa-gate` (it rebases onto `<remote>/<base>` and re-runs the checks), then
+  push. If it is not trivial, escalate.
 - `base-conflicted` — the base moved and now conflicts with this branch
   (`mergeStateStatus: DIRTY`). This is by definition not the trivial case, so do
   not auto-rebase or guess at a resolution: escalate to the developer through the

@@ -133,6 +133,17 @@ the flow, each with a backward-compatible default:
   macOS + VS Code only and best-effort: it presses the close button of the one
   window matching the worktree's basename (closing nothing if zero or several
   match) and never fails the teardown.
+- `watch:` — settings for `sapa-watch`. Its one key, `base_behind:`, is `protection`
+  (default) or `any`. `protection` treats the branch as behind only when GitHub
+  reports `mergeStateStatus: BEHIND`, which needs a "require branches up to date"
+  protection rule. `any` also reacts when the base has genuinely moved ahead
+  without that rule, keeping the branch rebased at the cost of a re-gate on every
+  merge to the base.
+
+  ```yaml
+  watch:
+    base_behind: any
+  ```
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`):

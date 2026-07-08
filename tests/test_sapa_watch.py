@@ -21,7 +21,9 @@ WATCH = os.path.join(HERE, "..", "bin", "sapa-watch")
 # A gh stub: for `pr view` it prints the fixture file (empty file => an
 # empty-but-successful response) and exits 0; if the fixture is missing it exits
 # non-zero (a failed fetch). For `api user` it prints $GH_LOGIN (empty when unset,
-# simulating an unresolvable viewer). Any other gh call is a no-op success.
+# simulating an unresolvable viewer). For the `api .../compare/...` call it prints
+# $GH_BEHIND_BY (default 0), or exits non-zero when $GH_COMPARE_FAILS is set (a
+# failed compare). Any other gh call is a no-op success.
 GH_STUB = """#!/bin/bash
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   if [ -n "${GH_FIXTURE:-}" ] && [ -f "$GH_FIXTURE" ]; then
@@ -33,6 +35,15 @@ fi
 if [ "$1" = "api" ] && [ "$2" = "user" ]; then
   printf '%s\\n' "${GH_LOGIN:-}"
   exit 0
+fi
+if [ "$1" = "api" ]; then
+  case "$2" in
+    *compare*)
+      if [ -n "${GH_COMPARE_FAILS:-}" ]; then exit 1; fi
+      printf '%s\\n' "${GH_BEHIND_BY:-0}"
+      exit 0
+      ;;
+  esac
 fi
 exit 0
 """
@@ -47,17 +58,22 @@ def pr(state="OPEN", merge="CLEAN", checks=None, reviews=None, comments=None):
         "reviews": reviews or [],
         "comments": comments or [],
         "baseRefName": "main",
+        "headRefName": "feature",
         "url": "https://example/pr/1",
     }
 
 
-def run_once(fixture, prior_state=None, gh_fails=False, login="me"):
+def run_once(fixture, prior_state=None, gh_fails=False, login="me",
+             base_behind="protection", behind_by=None, compare_fails=False):
     """Run `sapa-watch --once` against a stubbed gh.
 
     fixture: a PR dict to serialize, the string "empty" for an empty-but-
     successful response, or None. gh_fails: stub exits non-zero (failed fetch).
     login: the authenticated gh user the stub reports for `api user`; None leaves
     it unset, simulating a viewer that can't be resolved.
+    base_behind: value for --base-behind (protection | any). behind_by: the
+    compare API's behind_by the stub reports (None leaves it unset -> 0).
+    compare_fails: the stub's compare call exits non-zero.
     Returns (stdout, stderr, state_after_dict_or_None).
     """
     with tempfile.TemporaryDirectory() as d:
@@ -72,8 +88,14 @@ def run_once(fixture, prior_state=None, gh_fails=False, login="me"):
         env = dict(os.environ)
         env["PATH"] = bindir + os.pathsep + env["PATH"]
         env.pop("GH_LOGIN", None)
+        env.pop("GH_BEHIND_BY", None)
+        env.pop("GH_COMPARE_FAILS", None)
         if login is not None:
             env["GH_LOGIN"] = login
+        if behind_by is not None:
+            env["GH_BEHIND_BY"] = str(behind_by)
+        if compare_fails:
+            env["GH_COMPARE_FAILS"] = "1"
         if not gh_fails:
             with open(fixture_path, "w") as f:
                 f.write("" if fixture == "empty" else json.dumps(fixture))
@@ -86,7 +108,8 @@ def run_once(fixture, prior_state=None, gh_fails=False, login="me"):
                 json.dump(prior_state, f)
 
         p = subprocess.run(
-            [sys.executable, WATCH, "--once", "--state-file", state_file, "--start", d],
+            [sys.executable, WATCH, "--once", "--state-file", state_file, "--start", d,
+             "--base-behind", base_behind],
             capture_output=True, text=True, env=env,
         )
         assert p.returncode == 0, p.stderr
@@ -289,6 +312,61 @@ def test_behind_and_conflicted_are_distinct():
     out, _, after = run_once(pr(merge="BEHIND"), prior_state=prior)
     assert events(out) == [["base-behind"]], out
     assert after["conflicted"] is False, after
+
+
+@case
+def test_base_behind_any_fires_on_clean_when_base_ahead():
+    # `any` mode: a CLEAN PR whose compare reports behind_by > 0 (base moved
+    # ahead, no "up to date" protection rule) fires base-behind, edge-triggered.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    fixture = pr(merge="CLEAN")
+    out, _, after = run_once(fixture, prior_state=prior, base_behind="any", behind_by=3)
+    assert events(out) == [["base-behind"]], out
+    assert after["behind"] is True, after
+    # Held-behind on the next poll does not re-emit.
+    out2, _, _ = run_once(fixture, prior_state=after, base_behind="any", behind_by=3)
+    assert events(out2) == [], out2
+
+
+@case
+def test_base_behind_protection_ignores_compare():
+    # Default `protection` mode: the same CLEAN/behind-by fixture emits nothing,
+    # because protection reads only mergeStateStatus (which is CLEAN here).
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    fixture = pr(merge="CLEAN")
+    out, _, after = run_once(fixture, prior_state=prior, base_behind="protection", behind_by=3)
+    assert events(out) == [], out
+    assert after["behind"] is False, after
+
+
+@case
+def test_base_behind_any_still_fires_on_status_behind():
+    # `any` mode does not lose the protection path: mergeStateStatus BEHIND still
+    # fires base-behind (no compare call needed, so behind_by is irrelevant).
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    out, _, after = run_once(pr(merge="BEHIND"), prior_state=prior, base_behind="any")
+    assert events(out) == [["base-behind"]], out
+    assert after["behind"] is True, after
+
+
+@case
+def test_base_behind_any_dirty_is_conflicted_not_behind():
+    # `any` mode: a DIRTY PR escalates to base-conflicted and must not also fire
+    # base-behind, even when the base is genuinely ahead (behind_by > 0).
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    out, _, after = run_once(pr(merge="DIRTY"), prior_state=prior, base_behind="any", behind_by=3)
+    assert events(out) == [["base-conflicted"]], out
+    assert after["behind"] is False and after["conflicted"] is True, after
+
+
+@case
+def test_base_behind_any_compare_failure_no_false_fire():
+    # `any` mode: a failed compare call is treated as no signal (behind_by 0), so
+    # a CLEAN PR emits nothing rather than a spurious base-behind.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False, "conflicted": False}
+    out, _, after = run_once(pr(merge="CLEAN"), prior_state=prior, base_behind="any", compare_fails=True)
+    assert events(out) == [], out
+    assert after["behind"] is False, after
 
 
 @case

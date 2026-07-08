@@ -222,9 +222,10 @@ me through my existing notification hook, which opens the right window on click.
   and identical every session — into tested code, leaving only the response half
   (which the agent must reason about) in the skill, mirroring how `sapa section`
   owns the comment-ownership logic. (The helper does not read `remote`/`base` from
-  config, unlike the push/rebase subcommands: it resolves the PR by current
-  branch and detects a moved base from `gh`'s `mergeStateStatus`, so config has no
-  mechanical consumer here. The `sapa-watch` skill still reads them for the fixes
+  config, unlike the push/rebase subcommands: it resolves the PR by current branch
+  and detects a moved base from `gh`'s `mergeStateStatus`. The one config knob that
+  reaches the helper is `watch.base_behind`, which the skill reads and threads as
+  `--base-behind`; the `sapa-watch` skill still reads `remote`/`base` for the fixes
   it pushes and the rebase-and-gate it triggers.)
 - **Comment classification.** Two axes. First, by author: the `sapa watch`
   helper tags every new review/comment `self` (the authenticated gh user) or
@@ -238,6 +239,19 @@ me through my existing notification hook, which opens the right window on click.
   substance: the watcher distinguishes mechanical comments (it fixes and pushes)
   from subjective comments (it escalates). The exact mechanical/subjective
   boundary is an open decision.
+- **Behind detection.** `watch.base_behind` (default `protection`) chooses how a
+  behind branch is spotted. `protection` fires `base-behind` only on
+  `mergeStateStatus: BEHIND`, which GitHub reports only when a "require branches up
+  to date" protection rule is active. `any` also fires it when the base has
+  genuinely moved ahead without that rule — the status stays `CLEAN`/`UNSTABLE`, so
+  the helper consults GitHub's compare API (`behind_by > 0`) instead. It skips the
+  extra call when the status already answers it (`BEHIND` is behind, `DIRTY`
+  escalates to `base-conflicted` and must not also fire `base-behind`), and a
+  failed compare is read as no signal so it never fires a false `base-behind`.
+  `any` keeps branches aggressively current at the cost of a rebase and re-gate on
+  every merge to the base, so the default stays `protection`. A future `off` state
+  (never rebase, for teams that merge rather than rebase) is left as headroom in
+  the enum.
 - **Trivial-merge policy.** A moved `main` is auto-rebased only when the merge is
   trivial, and the gate is always re-run afterward before the PR is considered
   green. The precise definition of "trivial" is an open decision.

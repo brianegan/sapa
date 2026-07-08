@@ -37,11 +37,24 @@ unsubmitted draft that keeps its id when submitted; recording it while pending
 would dedup away the submitted review and strand it as pending. `ci-failed`,
 `base-behind`, and `base-conflicted` are edge-triggered:
 emitted when the PR transitions into that state, not on every poll while it
-holds. `base-behind` fires when the base moved and the branch can rebase cleanly
-(`mergeStateStatus: BEHIND`); `base-conflicted` fires when the base merge now
-conflicts (`mergeStateStatus: DIRTY`) — a distinct event because that case
-escalates rather than auto-rebases. `merged` / `closed` are terminal: emitted
-once, then the loop stops.
+holds. `base-behind` fires when the base moved and the branch can rebase cleanly;
+`base-conflicted` fires when the base merge now conflicts
+(`mergeStateStatus: DIRTY`) — a distinct event because that case escalates rather
+than auto-rebases. `merged` / `closed` are terminal: emitted once, then the loop
+stops.
+
+`--base-behind` controls how "behind" is detected:
+
+    protection (default) — fire base-behind only on `mergeStateStatus: BEHIND`,
+        which GitHub reports only when a "require branches up to date" protection
+        rule is active.
+    any — also fire base-behind when the base has genuinely moved ahead but no
+        such rule is forcing BEHIND (the status stays CLEAN/UNSTABLE). Detected
+        with GitHub's compare API (`behind_by > 0`), since mergeStateStatus can't
+        see it. Only this mode makes the extra compare call, and only when the
+        status is not already BEHIND (already behind) or DIRTY (escalates to
+        base-conflicted instead). Every merge to the base then makes each open PR
+        rebase and re-gate, so it is opt-in.
 
 Last-seen state is persisted to a state file (default: `<git-dir>/sapa-watch.json`)
 so a resumed session dedups against what a prior session already saw, rather than
@@ -54,6 +67,8 @@ Usage:
     sapa watch --once          # a single poll: diff against the state file, print, exit
     sapa watch --state-file P  # use P for last-seen state (default: <git-dir>/sapa-watch.json)
     sapa watch --start DIR     # locate the git dir for the state file from DIR (default: $PWD)
+    sapa watch --base-behind any  # also treat a genuinely-behind branch as behind
+                                  # without an "up to date" protection rule (default: protection)
 
 Loop tuning via env (seconds): SAPA_WATCH_INTERVAL (base, default 30),
 SAPA_WATCH_MAX_INTERVAL (cap, default 300), SAPA_WATCH_BACKOFF (factor, default 2).
@@ -79,7 +94,8 @@ FAILING_STATES = {"FAILURE", "ERROR"}
 
 # Only the fields diff() actually reads. `state` doubles as the fetch sanity
 # check: a response without it is not a usable PR view, so fetch_pr skips it.
-PR_JSON_FIELDS = "state,mergeStateStatus,statusCheckRollup,reviews,comments"
+# baseRefName/headRefName feed the compare call `--base-behind any` uses.
+PR_JSON_FIELDS = "state,mergeStateStatus,statusCheckRollup,reviews,comments,baseRefName,headRefName"
 
 
 def default_state_file(start: str) -> str:
@@ -199,7 +215,34 @@ def relation(node: dict, viewer: str | None) -> str:
     return "self" if author_of(node) == viewer else "other"
 
 
-def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
+def compare_behind_by(base: str | None, head: str | None) -> int:
+    """Commits `base` is ahead of `head`, via GitHub's compare API.
+
+    `behind_by > 0` means the base has moved ahead of this branch. Used only in
+    `--base-behind any` mode, where `mergeStateStatus` stays CLEAN because no
+    "up to date" protection rule is forcing BEHIND. Returns 0 on any failure,
+    empty, or non-integer body: a bad read is treated as "no behind signal" for
+    this poll — never a false base-behind — and the next good poll re-detects.
+    gh fills the {owner}/{repo} placeholders from the current repo.
+    """
+    if not base or not head:
+        return 0
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/compare/{base}...{head}", "--jq", ".behind_by"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError:
+        return 0
+    if proc.returncode != 0:
+        return 0
+    try:
+        return int((proc.stdout or "").strip())
+    except ValueError:
+        return 0
+
+
+def diff(pr: dict, prior: dict, viewer: str | None, base_behind: str = "protection") -> tuple:
     """Compare the fetched PR against the prior state.
 
     Returns (events, new_state, terminal). `terminal` is set on merged/closed,
@@ -231,6 +274,14 @@ def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
     # reviews, failing required checks) is left out: those states are already
     # surfaced by ci-failed / review events, so folding them in would double-fire.
     conflicted = status == "DIRTY"
+    # `any` mode: when the base has genuinely moved ahead but no "up to date"
+    # protection rule is forcing BEHIND (the status stays CLEAN/UNSTABLE), the
+    # compare API is the only signal. Skip the extra call when the status already
+    # answers it — BEHIND is already behind, DIRTY escalates to base-conflicted
+    # and must not also fire base-behind. Edge-triggering still rides the single
+    # `behind` flag below, so `any` needs no new state.
+    if base_behind == "any" and not behind and not conflicted:
+        behind = compare_behind_by(pr.get("baseRefName"), pr.get("headRefName")) > 0
 
     seen_reviews = set(prior["reviews"])
     seen_comments = set(prior["comments"])
@@ -267,7 +318,7 @@ def emit(events: list) -> None:
     sys.stdout.flush()
 
 
-def poll_once(state_file: str) -> tuple:
+def poll_once(state_file: str, base_behind: str = "protection") -> tuple:
     """One poll. Returns (terminal, changed).
 
     A skipped cycle (failed/empty fetch) emits nothing and leaves the state file
@@ -278,20 +329,20 @@ def poll_once(state_file: str) -> tuple:
         sys.stderr.write("sapa watch: skipped poll (empty or failed fetch)\n")
         return False, False  # (terminal, changed)
     prior = load_state(state_file)
-    events, new_state, terminal = diff(pr, prior, viewer_login())
+    events, new_state, terminal = diff(pr, prior, viewer_login(), base_behind)
     emit(events)
     if not terminal:
         save_state(state_file, new_state)
     return terminal, bool(events)
 
 
-def watch_loop(state_file: str) -> int:
+def watch_loop(state_file: str, base_behind: str = "protection") -> int:
     base = float(os.environ.get("SAPA_WATCH_INTERVAL", "30"))
     cap = float(os.environ.get("SAPA_WATCH_MAX_INTERVAL", "300"))
     factor = float(os.environ.get("SAPA_WATCH_BACKOFF", "2"))
     interval = base
     while True:
-        terminal, changed = poll_once(state_file)
+        terminal, changed = poll_once(state_file, base_behind)
         if terminal:
             return 0
         interval = base if changed else min(cap, max(base, interval) * factor)
@@ -309,16 +360,21 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="single poll, then exit")
     parser.add_argument("--state-file")
     parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
+    parser.add_argument(
+        "--base-behind", choices=("protection", "any"), default="protection",
+        help="how to detect a behind branch: protection (only mergeStateStatus BEHIND) "
+             "or any (also the compare API's behind_by, no protection rule needed)",
+    )
     args = parser.parse_args()
 
     state_file = args.state_file or default_state_file(args.start)
 
     if args.once:
-        poll_once(state_file)
+        poll_once(state_file, args.base_behind)
         return 0
 
     sys.stderr.write("sapa watch: watching PR for the current branch\n")
-    return watch_loop(state_file)
+    return watch_loop(state_file, args.base_behind)
 
 
 if __name__ == "__main__":
