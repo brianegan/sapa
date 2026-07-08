@@ -19,6 +19,7 @@ Events (one per line, tab-separated; the first token is the type):
     new-review   <id>  <author>  <state>  <self|other>
     new-comment  <id>  <author>  <self|other>
     base-behind
+    base-conflicted
     merged
     closed
 
@@ -33,10 +34,14 @@ unknown viewer never triggers a public reply to the developer's own comment.
 the last-seen ids (dedup). A review still in `PENDING` state is skipped entirely
 — not emitted and not recorded as seen — because it is the author's own
 unsubmitted draft that keeps its id when submitted; recording it while pending
-would dedup away the submitted review and strand it as pending. `ci-failed` and
-`base-behind` are edge-triggered:
+would dedup away the submitted review and strand it as pending. `ci-failed`,
+`base-behind`, and `base-conflicted` are edge-triggered:
 emitted when the PR transitions into that state, not on every poll while it
-holds. `merged` / `closed` are terminal: emitted once, then the loop stops.
+holds. `base-behind` fires when the base moved and the branch can rebase cleanly
+(`mergeStateStatus: BEHIND`); `base-conflicted` fires when the base merge now
+conflicts (`mergeStateStatus: DIRTY`) — a distinct event because that case
+escalates rather than auto-rebases. `merged` / `closed` are terminal: emitted
+once, then the loop stops.
 
 Last-seen state is persisted to a state file (default: `<git-dir>/sapa-watch.json`)
 so a resumed session dedups against what a prior session already saw, rather than
@@ -100,6 +105,7 @@ def load_state(path: str) -> dict:
         "comments": list(data.get("comments", [])),
         "ci_failing": bool(data.get("ci_failing", False)),
         "behind": bool(data.get("behind", False)),
+        "conflicted": bool(data.get("conflicted", False)),
     }
 
 
@@ -219,7 +225,12 @@ def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
     comment_ids = [str(c.get("id")) for c in (pr.get("comments") or []) if c.get("id") is not None]
     failing = failing_checks(pr.get("statusCheckRollup"))
     ci_failing = bool(failing)
-    behind = (pr.get("mergeStateStatus") or "").upper() == "BEHIND"
+    status = (pr.get("mergeStateStatus") or "").upper()
+    behind = status == "BEHIND"
+    # DIRTY is unambiguously a merge conflict against the base. BLOCKED (required
+    # reviews, failing required checks) is left out: those states are already
+    # surfaced by ci-failed / review events, so folding them in would double-fire.
+    conflicted = status == "DIRTY"
 
     seen_reviews = set(prior["reviews"])
     seen_comments = set(prior["comments"])
@@ -229,6 +240,8 @@ def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
         events.append(("ci-failed", ",".join(failing)))
     if behind and not prior["behind"]:
         events.append(("base-behind",))
+    if conflicted and not prior["conflicted"]:
+        events.append(("base-conflicted",))
     for r in reviews:
         rid = str(r.get("id"))
         if r.get("id") is not None and rid not in seen_reviews:
@@ -243,6 +256,7 @@ def diff(pr: dict, prior: dict, viewer: str | None) -> tuple:
         "comments": comment_ids,
         "ci_failing": ci_failing,
         "behind": behind,
+        "conflicted": conflicted,
     }
     return events, new_state, False
 

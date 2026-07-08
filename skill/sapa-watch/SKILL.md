@@ -71,6 +71,13 @@ the event type.
   up to date: if the rebase is trivial (no conflicts), invoke `/sapa-gate` (it
   rebases onto `<remote>/<base>` and re-runs the checks), then push. If it is not
   trivial, escalate.
+- `base-conflicted` — the base moved and now conflicts with this branch
+  (`mergeStateStatus: DIRTY`). This is by definition not the trivial case, so do
+  not auto-rebase or guess at a resolution: escalate to the developer through the
+  notification hook, naming the conflicting files (`git fetch <remote> && git
+  merge-tree --write-tree <remote>/<base> HEAD`, or a `--no-commit` merge/rebase
+  probe you abort, to list them). This is the same "escalate the non-trivial
+  conflict" policy as `base-behind`, wired to the state that actually carries it.
 - `merged` / `closed` — terminal. `sapa watch` emits this and exits; on `merged`,
   tear the stream down (below).
 
