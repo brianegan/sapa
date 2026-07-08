@@ -39,7 +39,7 @@ def bad(msg):
     fail += 1
 
 
-def run(args, start, status_dir):
+def run(args, start, status_dir, stdin=None):
     env = dict(os.environ)
     env["SAPA_STATUS_DIR"] = status_dir
     # PWD is what sapa-status defaults --start to; set it too so the default path
@@ -47,6 +47,7 @@ def run(args, start, status_dir):
     env["PWD"] = start
     return subprocess.run(
         [STATUS, *args, "--start", start],
+        input=stdin,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
 
@@ -135,6 +136,61 @@ with tempfile.TemporaryDirectory() as d:
         ok("no action flag is a usage error")
     else:
         bad("no action flag should error")
+
+    # --- --notification: discriminate a real prompt from the idle nudge ---
+    # A fresh stream keeps these run-state assertions isolated from the above.
+    _, nwt, nbranch = make_stream(os.path.join(d, "notif"), branch="60-notify")
+
+    idle_nudge = '{"message": "Claude is waiting for your input"}'
+    permission = '{"message": "Claude needs your permission to use Bash"}'
+
+    def seed(state):
+        run(["--state", state], nwt, status_dir)
+
+    # busy + no message → the agent paused mid-work: needs-you.
+    seed("busy")
+    r = run(["--notification"], nwt, status_dir, stdin="")
+    e = read_entry(status_dir, nbranch)
+    if r.returncode == 0 and e.get("state") == "needs-you":
+        ok("--notification while busy writes needs-you")
+    else:
+        bad("--notification while busy wrong (rc=%d): %r" % (r.returncode, e))
+
+    # idle + idle-nudge message → just the nudge: leave it idle.
+    seed("idle")
+    r = run(["--notification"], nwt, status_dir, stdin=idle_nudge)
+    e = read_entry(status_dir, nbranch)
+    if r.returncode == 0 and e.get("state") == "idle":
+        ok("--notification while idle with the nudge message stays idle")
+    else:
+        bad("--notification idle nudge wrong (rc=%d): %r" % (r.returncode, e))
+
+    # idle + permission message → the message rescues it: needs-you.
+    seed("idle")
+    r = run(["--notification"], nwt, status_dir, stdin=permission)
+    e = read_entry(status_dir, nbranch)
+    if r.returncode == 0 and e.get("state") == "needs-you":
+        ok("--notification with a permission message writes needs-you even when idle")
+    else:
+        bad("--notification permission-while-idle wrong (rc=%d): %r" % (r.returncode, e))
+
+    # busy + idle-nudge message → the message overrides a stale busy: stay put.
+    seed("busy")
+    r = run(["--notification"], nwt, status_dir, stdin=idle_nudge)
+    e = read_entry(status_dir, nbranch)
+    if r.returncode == 0 and e.get("state") == "busy":
+        ok("--notification nudge message does not upgrade a stale busy")
+    else:
+        bad("--notification nudge-over-busy wrong (rc=%d): %r" % (r.returncode, e))
+
+    # self-guard: --notification outside a sapa stream writes nothing, exits 0.
+    before = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    r = run(["--notification"], outside, status_dir, stdin=permission)
+    after = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    if r.returncode == 0 and before == after:
+        ok("--notification self-guards outside a sapa stream")
+    else:
+        bad("--notification self-guard failed (rc=%d, new: %r)" % (r.returncode, after - before))
 
 print()
 print("%d/%d passed" % (pass_, pass_ + fail))

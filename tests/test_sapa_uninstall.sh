@@ -87,7 +87,7 @@ HOME="$home4" SAPA_AGENTS=claude bash "$INSTALL" >/dev/null 2>&1     # wires our
 HOME="$home4" SAPA_AGENTS=claude bash "$UNINSTALL" >/dev/null 2>&1   # should unwire them
 if [ "$(count_hook "$sf" Stop 'status --state idle')" = "0" ] \
    && [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "0" ] \
-   && [ "$(count_hook "$sf" Notification 'status --state needs-you')" = "0" ]; then
+   && [ "$(count_hook "$sf" Notification 'status --notification')" = "0" ]; then
   ok "uninstall removes our status hooks"
 else
   bad "uninstall removes our status hooks"

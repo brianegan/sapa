@@ -113,7 +113,7 @@ sf="$home3/.claude/settings.json"
 
 out="$(HOME="$home3" SAPA_AGENTS=claude bash "$INSTALL" 2>&1)"; rc=$?
 if [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "1" ] \
-   && [ "$(count_hook "$sf" Notification 'status --state needs-you')" = "1" ] \
+   && [ "$(count_hook "$sf" Notification 'status --notification')" = "1" ] \
    && [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ]; then
   ok "install wires the three run-state status hooks"
 else
@@ -132,6 +132,27 @@ if [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ] \
   ok "re-install does not duplicate the status hook"
 else
   bad "re-install does not duplicate the status hook (idle=$(count_hook "$sf" Stop 'status --state idle'))"
+fi
+
+# --- upgrade path: a stale old-form Notification hook is migrated, not doubled ---
+# Before #60 the Notification hook ran `sapa status --state needs-you`. Re-running
+# install must replace that with `status --notification`, leaving no old copy.
+home4="$root/home4"
+mkdir -p "$home4/.claude"
+cat > "$home4/.claude/settings.json" <<JSON
+{
+  "hooks": {
+    "Notification": [ { "hooks": [ { "type": "command", "command": "$clone/bin/sapa status --state needs-you" } ] } ]
+  }
+}
+JSON
+sf4="$home4/.claude/settings.json"
+HOME="$home4" SAPA_AGENTS=claude bash "$INSTALL" >/dev/null 2>&1
+if [ "$(count_hook "$sf4" Notification 'status --notification')" = "1" ] \
+   && [ "$(count_hook "$sf4" Notification 'status --state needs-you')" = "0" ]; then
+  ok "re-install migrates a stale old-form Notification hook to --notification"
+else
+  bad "stale Notification hook not migrated (new=$(count_hook "$sf4" Notification 'status --notification'), old=$(count_hook "$sf4" Notification 'status --state needs-you'))"
 fi
 
 # --- an unreadable settings.json never aborts the install (best-effort hooks) ---
