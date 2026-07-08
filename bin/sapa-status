@@ -31,8 +31,17 @@ ones. This resolves the stream by walking up for a `.bare` project root (the sap
 worktree layout); outside a sapa stream it does nothing and exits 0, so the global
 hooks are harmless everywhere else.
 
+The `Notification` event is overloaded: Claude Code fires it both when the agent
+pauses mid-turn to ask (a permission/approval prompt — genuine attention) and for
+the ~60s idle nudge after a turn already ended (not attention). Mapping both to
+`needs-you` flips a paused stream to "needs you" ~60s after you walk away. So the
+Notification hook uses `--notification`, which discriminates before writing:
+primarily on the prior run-state (busy => mid-work => needs-you; idle => nudge =>
+leave it), with the payload message as a secondary check.
+
 Usage:
     sapa status --state busy|idle|needs-you   # set the run-state
+    sapa status --notification                 # Notification hook: write needs-you only if genuine
     sapa status --stage plan|build|gate|submit|watch   # set the lifecycle stage
     sapa status --clear                        # remove this stream's file
     sapa status --start DIR                    # resolve the stream from DIR (default: $PWD)
@@ -114,19 +123,67 @@ def now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def notification_message() -> str:
+    """Best-effort read of the Notification payload's `message` from stdin.
+
+    Claude Code delivers hook input as a JSON object on stdin. We only need the
+    `message` field, and only for a secondary check, so anything unexpected — no
+    stdin (a manual invocation on a tty), empty input, non-JSON, no `message` —
+    returns "" and lets the caller fall back to the run-state rule.
+    """
+    try:
+        if sys.stdin.isatty():
+            return ""
+        raw = sys.stdin.read()
+    except (OSError, ValueError):
+        return ""
+    if not raw.strip():
+        return ""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        msg = payload.get("message")
+        return msg if isinstance(msg, str) else ""
+    return ""
+
+
+def notification_is_attention(prior_state: str | None, message: str) -> bool:
+    """Whether a Notification is genuine attention (needs-you) or just the nudge.
+
+    Primary signal is the prior run-state; the message is a secondary belt.
+    """
+    msg = (message or "").lower()
+    # The idle nudge is never attention, even against a stale "busy".
+    if "waiting for your input" in msg:
+        return False
+    # A permission/approval prompt is always attention.
+    if "permission" in msg:
+        return True
+    # Otherwise fall back to the turn state: a Notification while busy is the
+    # agent pausing mid-work to ask; after Stop (idle) it is just noise.
+    return prior_state == "busy"
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         prog="sapa status", add_help=True, description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--state", choices=STATES)
+    p.add_argument("--notification", action="store_true")
     p.add_argument("--stage", choices=STAGES)
     p.add_argument("--clear", action="store_true")
     p.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
     args = p.parse_args(argv)
 
-    if not (args.state or args.stage or args.clear):
-        p.error("nothing to do: pass --state, --stage, or --clear")
+    if not (args.state or args.notification or args.stage or args.clear):
+        p.error("nothing to do: pass --state, --notification, --stage, or --clear")
+
+    # Read stdin before resolving the stream so a manual invocation on a tty is
+    # guarded the same way regardless of location; harmless when unused.
+    message = notification_message() if args.notification else ""
 
     worktree, basename = find_stream(args.start)
     if not basename:
@@ -134,6 +191,21 @@ def main(argv: list[str]) -> int:
         return 0
 
     path = os.path.join(registry_dir(), basename + ".json")
+
+    if args.notification:
+        # The Notification hook fires for both real attention and the idle nudge.
+        # Only write needs-you when it is genuine; otherwise leave the file be.
+        data = load(path)
+        if not notification_is_attention(data.get("state"), message):
+            return 0
+        data["branch"] = branch_of(worktree, basename)
+        data["state"] = "needs-you"
+        data["updated"] = now()
+        try:
+            save(path, data)
+        except OSError as e:
+            print(f"sapa status: could not write {path}: {e}", file=sys.stderr)
+        return 0
 
     if args.clear:
         try:

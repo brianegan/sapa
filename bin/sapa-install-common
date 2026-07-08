@@ -44,18 +44,19 @@ remove_link() {
 
 # manage_hooks add|remove — wire (or unwire) the run-state hooks that let the
 # window switcher (Jump) show whether each stream is running, at rest, or waiting.
-# They map Claude Code events to `sapa status --state`: UserPromptSubmit→busy,
-# Notification→needs-you, Stop→idle. `sapa status` self-guards, so these are inert
-# in any non-sapa session. Shared by sapa-install (add) and sapa-uninstall (remove)
-# so the wiring and unwiring can't drift.
+# They map Claude Code events to `sapa status`: UserPromptSubmit→busy, Stop→idle,
+# and Notification→`--notification`, which discriminates a real prompt from the
+# ~60s idle nudge instead of blindly writing needs-you. `sapa status` self-guards,
+# so these are inert in any non-sapa session. Shared by sapa-install (add) and
+# sapa-uninstall (remove) so the wiring and unwiring can't drift.
 #
 # This is the one place sapa edits a config file rather than printing a hint (the
 # PATH/completion hints stay hints). It is made safe the way remove_link is: it
-# only ever touches entries whose command is ours (matches `sapa status --state`),
-# leaving every other hook the user has untouched. Idempotent on add (re-adds a
-# clean copy, so a moved clone self-heals), exact on remove. python3 does the JSON
-# surgery; if it is missing, or the settings file can't be read or written, we skip
-# the hooks rather than fail the caller.
+# only ever touches entries whose command is ours (matches `sapa status --state`
+# or `--notification`), leaving every other hook the user has untouched. Idempotent
+# on add (re-adds a clean copy, so a moved clone self-heals), exact on remove.
+# python3 does the JSON surgery; if it is missing, or the settings file can't be
+# read or written, we skip the hooks rather than fail the caller.
 manage_hooks() {
   local action="$1" settings="$2" sapa_abs="$3"
   if ! command -v python3 >/dev/null 2>&1; then
@@ -66,11 +67,22 @@ manage_hooks() {
 import json, os, sys
 
 action, settings, sapa_abs = sys.argv[1], sys.argv[2], sys.argv[3]
-EVENTS = {"UserPromptSubmit": "busy", "Notification": "needs-you", "Stop": "idle"}
-MARK = "status --state"  # the signature that identifies a hook command as ours
+# Event -> the `sapa status` invocation wired for it. UserPromptSubmit/Stop record
+# a fixed state; Notification discriminates the idle nudge from a real prompt, so
+# it gets its own action rather than a fixed --state needs-you.
+EVENTS = {
+    "UserPromptSubmit": "status --state busy",
+    "Notification": "status --notification",
+    "Stop": "status --state idle",
+}
+# The signatures that identify a hook command as ours. Both forms are matched so a
+# re-install migrates a pre-existing Notification --state needs-you hook (old form)
+# to --notification (new form) rather than leaving a duplicate, and uninstall
+# removes either.
+MARKS = ("status --state", "status --notification")
 
 def is_ours(cmd):
-    return isinstance(cmd, str) and "sapa" in cmd and MARK in cmd
+    return isinstance(cmd, str) and "sapa" in cmd and any(m in cmd for m in MARKS)
 
 existed = os.path.exists(settings)
 if not existed and action == "remove":
@@ -113,12 +125,12 @@ def strip_ours(event):
     else:
         hooks.pop(event, None)
 
-for event, state in EVENTS.items():
+for event, invocation in EVENTS.items():
     strip_ours(event)  # remove any prior copy of ours first (idempotent add, exact remove)
     if action == "add":
         hooks.setdefault(event, []).append(
             {"hooks": [{"type": "command",
-                        "command": "%s status --state %s" % (sapa_abs, state)}]}
+                        "command": "%s %s" % (sapa_abs, invocation)}]}
         )
 
 if hooks:
