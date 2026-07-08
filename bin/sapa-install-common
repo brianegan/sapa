@@ -1,0 +1,43 @@
+#!/bin/bash
+# sapa install/uninstall — shared bits. Sourced by both sapa-install and
+# sapa-uninstall (never run directly, never linked, not a dispatcher command) so
+# the link inventory and the removal helper live in one place and can't drift
+# between the two commands. Callers have already set `set -euo pipefail`.
+
+# What sapa puts on PATH: just the `sapa` dispatcher. LEGACY_BINS is the old
+# one-per-command layout — never linked anymore, but swept on both install and
+# uninstall so upgrading from that layout leaves nothing stale behind. SKILLS go
+# into each agent's skills directory.
+BINS="sapa"
+LEGACY_BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
+SKILLS="sapa-plan sapa-build sapa-gate sapa-submit sapa-watch sapa-flow"
+
+bin_dir="${SAPA_BIN_DIR:-$HOME/.local/bin}"
+
+# The agents to target: an explicit SAPA_AGENTS list (commas allowed), otherwise
+# every known agent whose home directory exists.
+agents=""
+if [ -n "${SAPA_AGENTS:-}" ]; then
+  agents="$(printf '%s' "$SAPA_AGENTS" | tr ',' ' ')"
+else
+  for a in claude codex; do
+    [ -d "$HOME/.$a" ] && agents="$agents $a"
+  done
+fi
+
+# remove_link removes an entry only when it is a symlink whose target looks like
+# one of ours (matches the given glob), so a regular file or a link pointing
+# elsewhere is never touched. It tallies into the caller's `removed`/`skipped`.
+# Shared by the install-time legacy sweep and by uninstall.
+removed=0
+skipped=0
+remove_link() {
+  # $1 = path to the link, $2 = glob the target must match to be ours.
+  local link="$1" want="$2"
+  [ -L "$link" ] || return 0
+  local target; target="$(readlink "$link")"
+  case "$target" in
+    $want) rm -f "$link"; removed=$((removed+1)) ;;
+    *) skipped=$((skipped+1)) ;;
+  esac
+}

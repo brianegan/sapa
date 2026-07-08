@@ -9,9 +9,10 @@
 # their `main` checkout so the links track merged code. Re-running is safe
 # (idempotent), and it sweeps any links left by the old one-per-command layout.
 #
+# Removal is a separate command: `sapa uninstall`.
+#
 # Usage:
 #   sapa install              # link sapa and skills
-#   sapa install uninstall    # remove the symlinks sapa created
 #
 # (Run it as `bin/sapa install` from a fresh clone, before sapa is on PATH.)
 #
@@ -27,29 +28,21 @@ case "${1:-}" in
   -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
-mode="install"
 case "${1:-}" in
   "") ;;
-  uninstall) mode="uninstall" ;;
+  uninstall) echo "sapa install: uninstall is now its own command; run 'sapa uninstall'" >&2
+     exit 2 ;;
   *) echo "sapa install: unknown argument: $1" >&2
-     echo "usage: sapa install [uninstall]" >&2
+     echo "usage: sapa install" >&2
      exit 2 ;;
 esac
-
-# What goes on PATH: just the `sapa` dispatcher. LEGACY_BINS is the old
-# one-per-command layout — never linked anymore, but swept on both install and
-# uninstall so upgrading from that layout leaves nothing stale behind. SKILLS go
-# into each agent's skills directory.
-BINS="sapa"
-LEGACY_BINS="sapa-bootstrap sapa-worktree sapa-start sapa-config sapa-section sapa-teardown sapa-install"
-SKILLS="sapa-plan sapa-build sapa-gate sapa-submit sapa-watch sapa-flow"
 
 # Source is the clone this script lives in: bin/sapa-install -> repo root.
 # Resolve $0 through its symlink chain first, so re-running the linked copy on
 # PATH (e.g. ~/.local/bin/sapa) still installs from the original clone rather
 # than treating the PATH dir as the source. A portable readlink loop — readlink
 # -f is not reliable on macOS's BSD tools — handling absolute and relative link
-# targets.
+# targets. A twin of this loop lives in bin/sapa; keep the two in sync.
 self="$0"
 hops=0
 while [ -L "$self" ]; do
@@ -64,89 +57,50 @@ while [ -L "$self" ]; do
     *)  self="$(dirname "$self")/$link" ;;
   esac
 done
-SRC="$(cd "$(dirname "$self")/.." && pwd)"
+src_bindir="$(cd "$(dirname "$self")" && pwd)"
+SRC="$(cd "$src_bindir/.." && pwd)"
 
-bin_dir="${SAPA_BIN_DIR:-$HOME/.local/bin}"
+# The link inventory (BINS/LEGACY_BINS/SKILLS), the target bin_dir, the agents to
+# target, and remove_link — shared with sapa-uninstall so the two can't drift.
+# (src_bindir is the clone we install *from*; bin_dir, set there, is where the
+# links go — do not conflate the two.)
+. "$src_bindir/sapa-install-common"
 
-# Resolve the agents to target: an explicit SAPA_AGENTS list (commas allowed),
-# otherwise every known agent whose home directory exists.
-agents=""
-if [ -n "${SAPA_AGENTS:-}" ]; then
-  agents="$(printf '%s' "$SAPA_AGENTS" | tr ',' ' ')"
-else
-  for a in claude codex; do
-    [ -d "$HOME/.$a" ] && agents="$agents $a"
-  done
-fi
+mkdir -p "$bin_dir"
+for h in $BINS; do
+  ln -sfn "$SRC/bin/$h" "$bin_dir/$h"
+done
+echo "sapa install: linked sapa into $bin_dir"
 
-# remove_link removes an entry only when it is a symlink whose target looks like
-# one of ours (matches the given glob), so a regular file or a link pointing
-# elsewhere is never touched. Shared by the install-time legacy sweep and by
-# uninstall.
-removed=0
-skipped=0
-remove_link() {
-  # $1 = path to the link, $2 = glob the target must match to be ours.
-  local link="$1" want="$2"
-  [ -L "$link" ] || return 0
-  local target; target="$(readlink "$link")"
-  case "$target" in
-    $want) rm -f "$link"; removed=$((removed+1)) ;;
-    *) skipped=$((skipped+1)) ;;
-  esac
-}
-
-if [ "$mode" = "install" ]; then
-  mkdir -p "$bin_dir"
-  for h in $BINS; do
-    ln -sfn "$SRC/bin/$h" "$bin_dir/$h"
-  done
-  echo "sapa install: linked sapa into $bin_dir"
-
-  # Sweep leftover links from the old one-per-command layout so an upgrade in
-  # place doesn't leave stale sapa-* commands on PATH.
-  for h in $LEGACY_BINS; do
-    remove_link "$bin_dir/$h" "*/bin/$h"
-  done
-  [ "$removed" -gt 0 ] && echo "sapa install: removed $removed legacy sapa-* link(s) from $bin_dir"
-
-  if [ -n "${agents// }" ]; then
-    linked=""
-    for a in $agents; do
-      skills_dir="$HOME/.$a/skills"
-      mkdir -p "$skills_dir"
-      for s in $SKILLS; do
-        ln -sfn "$SRC/skill/$s" "$skills_dir/$s"
-      done
-      linked="$linked $a"
-    done
-    echo "sapa install: linked skills into${linked}"
-  else
-    echo "sapa install: no coding agents detected (~/.claude, ~/.codex); set SAPA_AGENTS to link skills anyway"
-  fi
-
-  # A PATH hint, not a failure — sapa is linked either way.
-  case ":$PATH:" in
-    *":$bin_dir:"*) ;;
-    *) echo "sapa install: note: $bin_dir is not on your PATH; add it, e.g. export PATH=\"$bin_dir:\$PATH\"" ;;
-  esac
-
-  # A completion hint, not a failure — we never edit your shell config, same as
-  # the PATH hint above. We print one line the user can copy, paste, and run to
-  # enable it themselves.
-  echo "sapa install: for zsh Tab-completion, run: echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"
-  exit 0
-fi
-
-# uninstall: remove the sapa link, any leftover legacy links, and the skill
-# links — each only when it is a symlink pointing into sapa.
-for h in $BINS $LEGACY_BINS; do
+# Sweep leftover links from the old one-per-command layout so an upgrade in
+# place doesn't leave stale sapa-* commands on PATH.
+for h in $LEGACY_BINS; do
   remove_link "$bin_dir/$h" "*/bin/$h"
 done
-for a in $agents; do
-  for s in $SKILLS; do
-    remove_link "$HOME/.$a/skills/$s" "*/skill/$s"
-  done
-done
+[ "$removed" -gt 0 ] && echo "sapa install: removed $removed legacy sapa-* link(s) from $bin_dir"
 
-echo "sapa install: removed $removed links (skipped $skipped not pointing into sapa)"
+if [ -n "${agents// }" ]; then
+  linked=""
+  for a in $agents; do
+    skills_dir="$HOME/.$a/skills"
+    mkdir -p "$skills_dir"
+    for s in $SKILLS; do
+      ln -sfn "$SRC/skill/$s" "$skills_dir/$s"
+    done
+    linked="$linked $a"
+  done
+  echo "sapa install: linked skills into${linked}"
+else
+  echo "sapa install: no coding agents detected (~/.claude, ~/.codex); set SAPA_AGENTS to link skills anyway"
+fi
+
+# A PATH hint, not a failure — sapa is linked either way.
+case ":$PATH:" in
+  *":$bin_dir:"*) ;;
+  *) echo "sapa install: note: $bin_dir is not on your PATH; add it, e.g. export PATH=\"$bin_dir:\$PATH\"" ;;
+esac
+
+# A completion hint, not a failure — we never edit your shell config, same as
+# the PATH hint above. We print one line the user can copy, paste, and run to
+# enable it themselves.
+echo "sapa install: for zsh Tab-completion, run: echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"

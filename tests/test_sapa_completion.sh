@@ -83,10 +83,12 @@ if command -v zsh >/dev/null 2>&1; then
   if [ "$count" = "$nlines" ] && [ "$count" -gt 0 ]; then ok "array parses to one element per command ($count)"; else bad "array parses to one element per command (count=$count, lines=$nlines)"; fi
   if printf '%s' "$watchel" | grep -q "branch's"; then ok "apostrophes in descriptions survive"; else bad "apostrophes in descriptions survive ($watchel)"; fi
 
-  # --- every subcommand dispatches to a real argument-completion branch ---
+  # --- every argument-taking subcommand dispatches to a real branch ---
   # Stub the completion helpers as recorders, drive _sapa for each command at the
   # argument position, and confirm each one actually calls a helper (never falls
   # through the case to silence — the root cause of "Tab doesn't always work").
+  # install and uninstall take no positional arguments (they read env vars), so
+  # they complete nothing by design and are excluded here.
   "$SAPA" completion zsh > "$root/_sapa.zsh"
   cat > "$root/probe.zsh" <<'PROBE'
 CALLS=()
@@ -95,7 +97,7 @@ _arguments(){ CALLS+=("$*") }; _alternative(){ CALLS+=("$*") }
 _files(){ CALLS+=("$*") }
 compdef(){ : }; autoload(){ : }; compinit(){ : }
 source "$SRC"
-for c in bootstrap worktree start config section watch teardown install completion; do
+for c in bootstrap worktree start config section watch teardown completion; do
   words=(sapa "$c" ""); CURRENT=3; CALLS=()
   _sapa
   (( ${#CALLS} )) && print -r -- "$c ok" || print -r -- "$c MISSING"
