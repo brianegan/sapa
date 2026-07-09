@@ -75,12 +75,16 @@ base.
     comment, feed its body through `sapa section plan`, patch in place). `sapa
     section` refuses a damaged read on its own, so there is no guard to hand-roll
     here. If that comment is locked or edited, leave it. Never touch the issue
-    body.
+    body. If you reached for the whole `/sapa-plan` skill rather than just its
+    step 4, it will have written `stage: plan`; re-run `sapa status --stage
+    watch` afterward to restore this stage.
 - `base-behind` — the base branch moved ahead: either branch protection needs the
   branch up to date (`protection` mode), or `any` mode detected the base is ahead
   on its own. Either way, if the rebase is trivial (no conflicts), invoke
   `/sapa-gate` (it rebases onto `<remote>/<base>` and re-runs the checks), then
-  push. If it is not trivial, escalate.
+  push, then re-run `sapa status --stage watch` — the gate wrote `stage: gate`
+  at its start, so without this the status file is stranded there once you are
+  back to watching. If it is not trivial, escalate.
 - `base-conflicted` — the base moved and now conflicts with this branch
   (`mergeStateStatus: DIRTY`). This is by definition not the trivial case, so do
   not auto-rebase or guess at a resolution: escalate to the developer through the
@@ -94,6 +98,14 @@ base.
 After you push a fix, `sapa watch` keeps running and will emit the next real
 change; you do not restart it. It dedupes against what it has already seen, so
 acting on an event will not make it fire again.
+
+Any time a handler runs another phase skill in full — `/sapa-gate` on
+`base-behind`, or the whole `/sapa-plan` skill if you reach for it on a review
+rather than just its step 4 — that phase overwrites `stage` with its own, since
+each phase writes `stage` once at its start and never restores it (`sapa-watch`
+is the only phase that delegates mid-run). So after any such hand-off returns,
+re-run `sapa status --stage watch` before looping, so the status file keeps
+reporting this stage to whatever reads it.
 
 If the PR was opened as a draft, the user may promote it to ready whenever they
 choose; keep watching across that transition. (When it shipped ready there is
