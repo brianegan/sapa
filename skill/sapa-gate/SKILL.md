@@ -36,9 +36,10 @@ Each gate step has a `name` and either:
 - `skill:` — a skill to invoke for that step (for example a review skill). Treat
   its findings as the step result.
 
-A step may also carry `model:` — a model to run that step on. It is meaningful
-for `skill:` steps; Step 3 says how to honour it. Absent, the step runs on the
-session model.
+A step may also carry `model:` — a model to run that step on, named the way the
+Agent tool's model override accepts (`fable`, `opus`, `sonnet`, `haiku`). It is
+meaningful for `skill:` steps; Step 3 says how to honour it. Absent, the step
+runs on the session model.
 
 ## Step 2 — Rebase the branch up to date
 

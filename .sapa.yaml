@@ -15,8 +15,7 @@ gate:
   # A step can invoke a skill...
   - name: review
     skill: code-review
-    # Review is judgment-dense, bounded, and needs no developer interaction,
-    # so pin it to the strongest model even when the session runs cheaper.
+    # Pin review to the strongest model; sessions can run cheaper (see PRD).
     model: fable
   # ...or run a shell command (prefix with a version manager if needed).
   - name: test

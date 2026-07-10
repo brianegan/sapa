@@ -147,8 +147,9 @@ the flow, each with a backward-compatible default:
 
 Each gate step under `gate:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`). A step may also carry `model:`,
-which pins that step to a model — meaningful for `skill:` steps, which then run
-in a sub-agent pinned to it; absent, the step inherits the session model. The
+which pins that step to a model (`fable`, `opus`, `sonnet`, `haiku`) — meaningful
+for `skill:` steps, which then run in a sub-agent pinned to it; absent, the step
+inherits the session model. The
 recommended posture: run sessions on Opus and pin the review step to Fable, so
 the strongest model's judgment lands on the one step that is bounded,
 token-light, and needs no mid-task conversation.
