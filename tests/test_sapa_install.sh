@@ -114,10 +114,11 @@ sf="$home3/.claude/settings.json"
 out="$(HOME="$home3" SAPA_AGENTS=claude bash "$INSTALL" 2>&1)"; rc=$?
 if [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "1" ] \
    && [ "$(count_hook "$sf" Notification 'status --notification')" = "1" ] \
+   && [ "$(count_hook "$sf" PreToolUse 'status --active')" = "1" ] \
    && [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ]; then
-  ok "install wires the three run-state status hooks"
+  ok "install wires the four run-state status hooks"
 else
-  bad "install wires the three run-state status hooks (rc=$rc, $out)"
+  bad "install wires the four run-state status hooks (rc=$rc, $out)"
 fi
 if printf '%s' "$out" | grep -q "wired run-state status hooks"; then ok "install reports wiring the hooks"; else bad "install reports wiring the hooks ($out)"; fi
 if [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then ok "install preserves an existing hook"; else bad "install preserves an existing hook"; fi
@@ -128,10 +129,11 @@ if grep -q '"model"' "$sf"; then ok "install leaves unrelated settings keys inta
 # --- re-install does not duplicate ---
 HOME="$home3" SAPA_AGENTS=claude bash "$INSTALL" >/dev/null 2>&1
 if [ "$(count_hook "$sf" Stop 'status --state idle')" = "1" ] \
+   && [ "$(count_hook "$sf" PreToolUse 'status --active')" = "1" ] \
    && [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then
   ok "re-install does not duplicate the status hook"
 else
-  bad "re-install does not duplicate the status hook (idle=$(count_hook "$sf" Stop 'status --state idle'))"
+  bad "re-install does not duplicate the status hook (idle=$(count_hook "$sf" Stop 'status --state idle'), active=$(count_hook "$sf" PreToolUse 'status --active'))"
 fi
 
 # --- upgrade path: a stale old-form Notification hook is migrated, not doubled ---

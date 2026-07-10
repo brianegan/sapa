@@ -39,9 +39,19 @@ Notification hook uses `--notification`, which discriminates before writing:
 primarily on the prior run-state (busy => mid-work => needs-you; idle => nudge =>
 leave it), with the payload message as a secondary check.
 
+`needs-you` would otherwise be sticky: it is set when the agent pauses to ask, but
+resolving that prompt by approving a permission or answering a tool-based question
+does not fire `UserPromptSubmit`, so nothing writes `busy` and the stream stays
+"needs you" while the agent actively works. The `PreToolUse` hook fixes this with
+`--active`: the agent's next tool call clears a stale `needs-you`. Because
+`PreToolUse` fires on *every* tool call, `--active` writes only when there is
+something to clear — it downgrades `needs-you` to `busy` and otherwise no-ops (no
+file write, no `git` fork), so an active build does not churn the file.
+
 Usage:
     sapa status --state busy|idle|needs-you   # set the run-state
     sapa status --notification                 # Notification hook: write needs-you only if genuine
+    sapa status --active                        # PreToolUse hook: clear a stale needs-you on resumed work
     sapa status --stage plan|build|gate|submit|watch   # set the lifecycle stage
     sapa status --clear                        # remove this stream's file
     sapa status --start DIR                    # resolve the stream from DIR (default: $PWD)
@@ -173,13 +183,14 @@ def main(argv: list[str]) -> int:
     )
     p.add_argument("--state", choices=STATES)
     p.add_argument("--notification", action="store_true")
+    p.add_argument("--active", action="store_true")
     p.add_argument("--stage", choices=STAGES)
     p.add_argument("--clear", action="store_true")
     p.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
     args = p.parse_args(argv)
 
-    if not (args.state or args.notification or args.stage or args.clear):
-        p.error("nothing to do: pass --state, --notification, --stage, or --clear")
+    if not (args.state or args.notification or args.active or args.stage or args.clear):
+        p.error("nothing to do: pass --state, --notification, --active, --stage, or --clear")
 
     # Read stdin before resolving the stream so a manual invocation on a tty is
     # guarded the same way regardless of location; harmless when unused.
@@ -200,6 +211,24 @@ def main(argv: list[str]) -> int:
             return 0
         data["branch"] = branch_of(worktree, basename)
         data["state"] = "needs-you"
+        data["updated"] = now()
+        try:
+            save(path, data)
+        except OSError as e:
+            print(f"sapa status: could not write {path}: {e}", file=sys.stderr)
+        return 0
+
+    if args.active:
+        # The PreToolUse hook fires on every tool call. Its only job is to clear a
+        # stale needs-you the instant the agent resumes work (after you approve a
+        # permission or answer a tool-based question, which never fires
+        # UserPromptSubmit). Downgrade needs-you to busy; otherwise no-op — no
+        # write and no git fork — so an active build does not churn the file.
+        data = load(path)
+        if data.get("state") != "needs-you":
+            return 0
+        data["branch"] = branch_of(worktree, basename)
+        data["state"] = "busy"
         data["updated"] = now()
         try:
             save(path, data)

@@ -300,9 +300,13 @@ me through my existing notification hook, which opens the right window on click.
   writers never clobber each other. The producer/consumer split is deliberate: sapa
   owns writing the status; rendering stays in the switcher, keeping sapa a local
   producer with no hosted UI. Run-state comes from Claude Code hooks
-  (`UserPromptSubmit → busy`, `Notification → needs-you`, `Stop → idle`) because
-  hooks fire deterministically regardless of what the agent is doing; stage comes
-  from the phase skills. `sapa install` wires those hooks into
+  (`UserPromptSubmit → busy`, `Notification → needs-you`, `PreToolUse → busy`,
+  `Stop → idle`) because hooks fire deterministically regardless of what the agent
+  is doing; stage comes from the phase skills. `PreToolUse` clears a stale
+  `needs-you` when the agent resumes work after you resolve a prompt without typing
+  a fresh one (approving a permission or answering a tool-based question never
+  fires `UserPromptSubmit`); it only downgrades `needs-you`, so firing on every
+  tool call does not churn the file. `sapa install` wires those hooks into
   `~/.claude/settings.json` — the one config file sapa edits rather than hinting at,
   justified because reliable run-state is only available through hooks. It is made
   safe the way the symlink installer is: idempotent, reversible (`sapa uninstall`
