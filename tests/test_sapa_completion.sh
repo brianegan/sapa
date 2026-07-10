@@ -105,6 +105,35 @@ done
 PROBE
   probeout="$(SRC="$root/_sapa.zsh" zsh "$root/probe.zsh")"
   if ! printf '%s' "$probeout" | grep -q MISSING; then ok "every subcommand has an argument-completion branch"; else bad "every subcommand has an argument-completion branch ($(printf '%s' "$probeout" | grep MISSING))"; fi
+
+  # --- teardown's blank word reaches directory completion directly ---
+  # The reported bug: `sapa teardown <TAB>` completed nothing. The cause was
+  # routing directory completion through `_arguments '::worktree:_files -/'` —
+  # `_arguments` treats words[1] (sapa) as the command and parses positionals
+  # from words[2] (teardown), so the subcommand word swallowed the lone spec and
+  # the current word got nothing. The earlier grep-only check missed it because
+  # the branch text still contained `_files -/`. Drive _sapa and record which
+  # helper each path actually calls: a blank word must call `_files -/`
+  # directly, and a dash word must reach the options instead of files.
+  cat > "$root/teardown_probe.zsh" <<'PROBE'
+FILES=""; ARGS=""
+_files(){ FILES="$*" }
+_arguments(){ ARGS="$*" }
+_describe(){ : }; _values(){ : }; _alternative(){ : }
+compdef(){ : }; autoload(){ : }; compinit(){ : }
+source "$SRC"
+words=(sapa teardown ""); CURRENT=3; FILES=""; ARGS=""
+_sapa
+print -r -- "blank files=[$FILES] args=[$ARGS]"
+words=(sapa teardown "-"); CURRENT=3; FILES=""; ARGS=""
+_sapa
+print -r -- "dash files=[$FILES] args=[$ARGS]"
+PROBE
+  tdout="$(SRC="$root/_sapa.zsh" zsh "$root/teardown_probe.zsh")"
+  blankline="$(printf '%s\n' "$tdout" | grep '^blank ')"
+  dashline="$(printf '%s\n' "$tdout" | grep '^dash ')"
+  if printf '%s' "$blankline" | grep -q 'files=\[-/\]'; then ok "teardown blank word calls _files -/ directly"; else bad "teardown blank word calls _files -/ directly ($blankline)"; fi
+  if printf '%s' "$dashline" | grep -q 'args=\[.*--force'; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
 else
   echo "skip zsh -n / parse checks (zsh not installed)"
 fi
