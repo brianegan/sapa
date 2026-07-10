@@ -265,6 +265,51 @@ in the switcher. [Jump](https://github.com/brianegan/jump) is the reference
 consumer; any tool that can match a window to a stream by title and read the JSON
 can use it.
 
+## Prior art
+
+Sapa is not the first tool to gate AI-written code or to run agents in parallel
+worktrees. It is a deliberate set of opposite choices from the tools that do.
+
+- [no-mistakes](https://github.com/kunchenguid/no-mistakes) is the closest in
+  spirit and the exact inverse in architecture — the tool sapa was built in
+  reaction to (see the [Problem Statement](PRD.md)). It runs the same rough
+  pipeline (gate, ship, watch CI) but puts a git proxy in front of `origin`,
+  gates in a disposable worktree, runs the gate as a background daemon, and
+  overwrites the PR body on every push. Sapa keeps one remote, gates in the live
+  tree in the foreground where you can cancel and rerun, and locks the PR body
+  the moment you touch it.
+- [Orca](https://github.com/stablyai/orca) and [Composio Agent
+  Orchestrator](https://github.com/ComposioHQ/agent-orchestrator) are
+  parallel-agent cockpits — a desktop IDE and a daemon-plus-dashboard supervisor
+  — that run many agents in isolated worktrees and surface their PRs. They
+  overlap sapa's worktree-per-stream half and stop before the autonomous
+  gate-ship-watch: CI fixes are a manual button or a nudge to the agent, review
+  comments are shown but not addressed, and nothing is written back to the issue.
+  Sapa has no daemon and no dashboard; concurrency is one editor window per
+  stream, and closing the window ends that stream's watch.
+
+Three things sapa does that none of them do:
+
+1. **It owns the prose without clobbering yours.** The PR body has a
+   machine-managed section that locks the instant you edit it, and the agreed
+   plan lives as a managed comment on the GitHub issue that reconciles when what
+   shipped diverges from what was planned. The others either overwrite your
+   description or never write one, and none record the plan on the issue.
+2. **It triages comments on two axes.** By author — your own comments come back
+   to you in the agent chat, a colleague's are answered on GitHub with a "Sapa
+   Workflow, on your behalf" line — and by substance, so mechanical comments are
+   fixed and pushed while subjective ones are escalated to you. The others
+   classify bot-versus-human at most.
+3. **It runs inside the session that wrote the code.** No proxy, no daemon, no
+   supervisor, one remote, gate in your live tree. The OS owns process lifecycle,
+   so there is no hidden state to reconcile and no single supervisor to become a
+   bottleneck across streams.
+
+One honest caveat: no-mistakes already fixes CI failures and rebases a moved base
+on its own, so post-PR autopilot itself is not new. What is new is doing it from
+inside your session with no second remote, plus the comment triage and the
+issue-plan and PR-body ownership it lacks.
+
 ## Test
 
 ```sh
