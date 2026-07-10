@@ -98,10 +98,16 @@ $pairs
       # Priority: a blank word completes directories (the common case, picking a
       # worktree to remove); only a dash-prefixed word reaches for the options,
       # so \`--\` offers (and cycles through) the flags.
+      #
+      # Complete directories with \`_files\` directly, not through \`_arguments\`.
+      # \`_arguments\` treats \${words[1]} (\`sapa\`) as the command and parses
+      # positionals from \${words[2]} (\`teardown\`) on, so the subcommand word
+      # eats a lone positional spec and the real current word gets nothing.
+      # \`_files\` completes the current word in place, sidestepping that offset.
       if [[ \${words[CURRENT]} == -* ]]; then
         _arguments '--force[remove even with uncommitted changes]'
       else
-        _arguments '::worktree:_files -/'
+        _files -/
       fi
       ;;
     completion) _values 'shell' 'zsh' ;;
