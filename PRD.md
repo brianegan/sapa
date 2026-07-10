@@ -272,6 +272,24 @@ me through my existing notification hook, which opens the right window on click.
 - **v1 reviewer.** The gate runs with Claude only in v1. Cross-model review
   (Codex reviews, Claude implements) is designed for via configuration and
   deferred.
+- **Model posture (#65).** The ClaudeDevs delegation patterns — a strong model
+  coordinating while cheaper sub-agents build, or a cheap session consulting a
+  strong advisor — were evaluated and delegating authorship was declined on
+  quality grounds. The thread's own SWE-bench Pro numbers: Sonnet 5 solo ~0.755,
+  Sonnet 5 with a Fable advisor ~0.84, Fable 5 solo ~0.91 — every delegation
+  pattern gives up accuracy against the strongest model working alone.
+  Authorship sets the quality ceiling and review only defends it, and a builder
+  sub-agent cannot talk to the developer, so plan ambiguity becomes escalation
+  round trips. Adopted instead: sessions stay model-agnostic with Opus as the
+  recommended executor, and the gate's review step is pinned to Fable via a
+  per-step `model:` key on gate steps — review is the one judgment-dense moment
+  that is bounded, token-light, and needs no mid-task developer interaction, and
+  a fresh-context reviewer avoids author-reviews-own-work bias regardless of
+  model. The key stays agent-interpreted like `plan:` and `pr:`. Reserve
+  positions: if cost tightens further, the advisor posture — Sonnet sessions
+  with Fable pinned at plan and review — is the designed fallback at roughly 92%
+  of solo quality for 63% of the price; if quality headroom is wanted later, the
+  cross-model reviewer (user story 27) remains the direction.
 - **Plan capture on the issue.** The agreed plan is written to the GitHub issue,
   not kept in the local session and not committed to the code repo. It lives in a
   dedicated, machine-managed "Plan" comment on the issue — never in the issue
