@@ -36,6 +36,11 @@ Each gate step has a `name` and either:
 - `skill:` — a skill to invoke for that step (for example a review skill). Treat
   its findings as the step result.
 
+A step may also carry `model:` — a model to run that step on, named the way the
+Agent tool's model override accepts (`fable`, `opus`, `sonnet`, `haiku`). It is
+meaningful for `skill:` steps; Step 3 says how to honour it. Absent, the step
+runs on the session model.
+
 ## Step 2 — Rebase the branch up to date
 
 Bring the branch up to date so the gate runs against what will merge: first
@@ -92,6 +97,15 @@ merge-base. Quote the substitution so the newline-separated paths survive. An
 empty result (the branch matches the base) is fine — the variables come through
 empty. This contract applies to `run:` steps only; a `skill:` step invokes a
 skill rather than a shell, so the variables do not apply to it.
+
+When a `skill:` step names a `model:`, run that step inside a single sub-agent
+pinned to that model via the Agent tool's model override. The sub-agent's
+prompt: invoke that skill against the diff `<remote>/<base>...HEAD` and return
+its findings verbatim. Treat the sub-agent's findings as the step result,
+exactly as an in-session skill invocation would be. Sub-agents the skill itself
+spawns inherit the pinned model, so a review skill's parallel reviewers run on
+it too. Without `model:`, invoke the skill in-session — today's behaviour,
+unchanged.
 
 - All steps pass → report the branch is green and stop. `/sapa-submit` ships it
   next.
