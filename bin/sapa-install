@@ -11,11 +11,12 @@
 #
 # Removal is a separate command: `sapa uninstall`.
 #
-# When Claude Code is a target, it also wires three run-state hooks into
+# When Claude Code is a target, it also wires four run-state hooks into
 # ~/.claude/settings.json (UserPromptSubmit/Stop → `sapa status --state`,
-# Notification → `sapa status --notification`) so a window switcher can show
-# whether each stream is running, at rest, or waiting. This is the one config file
-# sapa edits; it touches only its own entries and `sapa uninstall` removes them.
+# Notification → `sapa status --notification`, PreToolUse → `sapa status
+# --active`) so a window switcher can show whether each stream is running, at
+# rest, or waiting. This is the one config file sapa edits; it touches only its
+# own entries and `sapa uninstall` removes them.
 #
 # Usage:
 #   sapa install              # link sapa and skills

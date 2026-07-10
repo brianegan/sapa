@@ -192,6 +192,67 @@ with tempfile.TemporaryDirectory() as d:
     else:
         bad("--notification self-guard failed (rc=%d, new: %r)" % (r.returncode, after - before))
 
+    # --- --active: clear a stale needs-you on resumed work, and only then ---
+    # The PreToolUse hook fires on every tool call, so --active must downgrade a
+    # stale needs-you and otherwise not write the file at all. The no-op cases
+    # seed a distinct past `updated` directly and assert the entry is untouched,
+    # which pins down "no write" rather than merely "no state change".
+    _, awt, abranch = make_stream(os.path.join(d, "active"), branch="66-resume")
+    apath = os.path.join(status_dir, abranch + ".json")
+
+    def write_entry(data):
+        os.makedirs(status_dir, exist_ok=True)
+        with open(apath, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    # needs-you → busy: resuming work clears the stale attention.
+    run(["--state", "needs-you"], awt, status_dir)
+    r = run(["--active"], awt, status_dir)
+    e = read_entry(status_dir, abranch)
+    if r.returncode == 0 and e.get("state") == "busy":
+        ok("--active downgrades a stale needs-you to busy")
+    else:
+        bad("--active needs-you->busy wrong (rc=%d): %r" % (r.returncode, e))
+
+    # already busy → no write at all (the common per-tool-call case).
+    stale_busy = {"branch": abranch, "state": "busy", "stage": "build",
+                  "updated": "2020-01-01T00:00:00Z"}
+    write_entry(dict(stale_busy))
+    r = run(["--active"], awt, status_dir)
+    e = read_entry(status_dir, abranch)
+    if r.returncode == 0 and e == stale_busy:
+        ok("--active while busy leaves the file untouched (no churn)")
+    else:
+        bad("--active while busy wrote the file (rc=%d): %r" % (r.returncode, e))
+
+    # idle → no write either.
+    stale_idle = {"branch": abranch, "state": "idle", "stage": "build",
+                  "updated": "2020-01-01T00:00:00Z"}
+    write_entry(dict(stale_idle))
+    r = run(["--active"], awt, status_dir)
+    e = read_entry(status_dir, abranch)
+    if r.returncode == 0 and e == stale_idle:
+        ok("--active while idle leaves the file untouched")
+    else:
+        bad("--active while idle wrote the file (rc=%d): %r" % (r.returncode, e))
+
+    # no status file yet → nothing to clear, and none is created.
+    os.remove(apath)
+    r = run(["--active"], awt, status_dir)
+    if r.returncode == 0 and not os.path.exists(apath):
+        ok("--active with no status file creates nothing")
+    else:
+        bad("--active created a file with no prior state (rc=%d)" % r.returncode)
+
+    # self-guard: --active outside a sapa stream writes nothing, exits 0.
+    before = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    r = run(["--active"], outside, status_dir)
+    after = set(os.listdir(status_dir)) if os.path.isdir(status_dir) else set()
+    if r.returncode == 0 and before == after:
+        ok("--active self-guards outside a sapa stream")
+    else:
+        bad("--active self-guard failed (rc=%d, new: %r)" % (r.returncode, after - before))
+
 print()
 print("%d/%d passed" % (pass_, pass_ + fail))
 sys.exit(1 if fail else 0)

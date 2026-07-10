@@ -45,10 +45,12 @@ remove_link() {
 # manage_hooks add|remove — wire (or unwire) the run-state hooks that let the
 # window switcher (Jump) show whether each stream is running, at rest, or waiting.
 # They map Claude Code events to `sapa status`: UserPromptSubmit→busy, Stop→idle,
-# and Notification→`--notification`, which discriminates a real prompt from the
-# ~60s idle nudge instead of blindly writing needs-you. `sapa status` self-guards,
-# so these are inert in any non-sapa session. Shared by sapa-install (add) and
-# sapa-uninstall (remove) so the wiring and unwiring can't drift.
+# Notification→`--notification` (which discriminates a real prompt from the ~60s
+# idle nudge instead of blindly writing needs-you), and PreToolUse→`--active`
+# (which clears a stale needs-you the instant the agent resumes work, and no-ops
+# otherwise so it doesn't churn the file on every tool call). `sapa status`
+# self-guards, so these are inert in any non-sapa session. Shared by sapa-install
+# (add) and sapa-uninstall (remove) so the wiring and unwiring can't drift.
 #
 # This is the one place sapa edits a config file rather than printing a hint (the
 # PATH/completion hints stay hints). It is made safe the way remove_link is: it
@@ -68,18 +70,20 @@ import json, os, sys
 
 action, settings, sapa_abs = sys.argv[1], sys.argv[2], sys.argv[3]
 # Event -> the `sapa status` invocation wired for it. UserPromptSubmit/Stop record
-# a fixed state; Notification discriminates the idle nudge from a real prompt, so
-# it gets its own action rather than a fixed --state needs-you.
+# a fixed state; Notification discriminates the idle nudge from a real prompt, and
+# PreToolUse clears a stale needs-you on resumed work, so each gets its own action
+# rather than a fixed --state.
 EVENTS = {
     "UserPromptSubmit": "status --state busy",
     "Notification": "status --notification",
+    "PreToolUse": "status --active",
     "Stop": "status --state idle",
 }
-# The signatures that identify a hook command as ours. Both forms are matched so a
+# The signatures that identify a hook command as ours. Every form is matched so a
 # re-install migrates a pre-existing Notification --state needs-you hook (old form)
 # to --notification (new form) rather than leaving a duplicate, and uninstall
-# removes either.
-MARKS = ("status --state", "status --notification")
+# removes any of them.
+MARKS = ("status --state", "status --notification", "status --active")
 
 def is_ours(cmd):
     return isinstance(cmd, str) and "sapa" in cmd and any(m in cmd for m in MARKS)
