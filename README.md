@@ -40,6 +40,10 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   the branch name from the issue title and calls `sapa worktree`).
 - `sapa config` — find the project's `.sapa.yaml` by walking up, the way
   `sapa worktree` finds `.bare`.
+- `sapa tmp` — print (creating on first use) a scratch directory scoped to the
+  current stream, keyed by its branch the way `sapa status` keys its registry.
+  The phase skills write their intermediate files there so two streams in the
+  same phase never clobber each other's scratch.
 - `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
 - `sapa status` — record the current stream's run-state and lifecycle stage to a

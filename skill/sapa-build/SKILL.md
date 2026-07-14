@@ -27,11 +27,13 @@ build` (best-effort — it no-ops outside a sapa stream and never needs your inp
    ```
    id=$(gh api /repos/{owner}/{repo}/issues/<N>/comments --paginate \
      --jq '.[] | select(.body | contains("<!-- sapa:plan")) | .id')
-   gh api /repos/{owner}/{repo}/issues/comments/$id --jq .body > /tmp/sapa-plan.md
+   gh api /repos/{owner}/{repo}/issues/comments/$id --jq .body > "$(sapa tmp)/plan.md"
    ```
 
-   Confirm the read is whole: `sapa section plan --check --body-file
-   /tmp/sapa-plan.md` exits non-zero if the body is damaged — a truncated read
+   `$(sapa tmp)` is this stream's own scratch directory, so a parallel stream's
+   plan can't land in the file you read back. Confirm the read is whole: `sapa
+   section plan --check --body-file "$(sapa tmp)/plan.md"` exits non-zero if the
+   body is damaged — a truncated read
    that lost the closing marker. If it errors, stop and report; do not build from
    a half-read plan. If there is no `sapa:plan` comment at all (no id), stop and
    say the plan has not been recorded yet (run `/sapa-plan` first).

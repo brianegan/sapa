@@ -49,10 +49,12 @@ Run `sapa config -p` and read these top-level keys (all optional):
 
 3. Build the PR body in a managed section so it is protected from the start.
    Write the composed `## Summary` / `## Changes` / `## Testing` markdown to
-   `/tmp/sapa-pr.md`, then wrap it:
+   `$(sapa tmp)/pr.md` — this stream's own scratch directory, so parallel streams
+   don't clobber each other, and the path is stable across the commands below —
+   then wrap it:
 
    ```
-   printf '' | sapa section pr-description --content-file /tmp/sapa-pr.md > /tmp/sapa-pr-body.md
+   printf '' | sapa section pr-description --content-file "$(sapa tmp)/pr.md" > "$(sapa tmp)/pr-body.md"
    ```
 
    Append `\n\nCloses #<N>` so the PR links its issue. It sits outside the
@@ -61,7 +63,7 @@ Run `sapa config -p` and read these top-level keys (all optional):
    composed above. When `pr` is `draft` (the default):
 
    ```
-   gh pr create --draft --base <base> --title "<title>" --body-file /tmp/sapa-pr-body.md
+   gh pr create --draft --base <base> --title "<title>" --body-file "$(sapa tmp)/pr-body.md"
    ```
 
    When `pr` is `ready`, run the same command without `--draft`. Either command
@@ -72,14 +74,14 @@ Run `sapa config -p` and read these top-level keys (all optional):
    body untruncated, then run it through `sapa section`:
 
    ```
-   gh pr view <N> --json body --jq .body > /tmp/sapa-pr-existing.md
-   sapa section pr-description --content-file /tmp/sapa-pr.md --body-file /tmp/sapa-pr-existing.md > /tmp/sapa-pr-body.md
+   gh pr view <N> --json body --jq .body > "$(sapa tmp)/pr-existing.md"
+   sapa section pr-description --content-file "$(sapa tmp)/pr.md" --body-file "$(sapa tmp)/pr-existing.md" > "$(sapa tmp)/pr-body.md"
    ```
 
    `sapa section` exits non-zero (nothing on stdout) if that body is damaged — a
    truncated read missing its closing marker, which editing would duplicate. If
    it errors, stop and report; re-read the body in full rather than edit.
-   Otherwise run `gh pr edit <N> --body-file /tmp/sapa-pr-body.md` only if the
+   Otherwise run `gh pr edit <N> --body-file "$(sapa tmp)/pr-body.md"` only if the
    status is `created`/`updated`. If `locked`/`locked-edited`, leave the body
    alone. Either way, note the URL for the summary with
    `gh pr view <N> --json url --jq .url`.
