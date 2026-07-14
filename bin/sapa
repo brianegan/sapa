@@ -16,6 +16,7 @@
 #   worktree    spin up a per-branch worktree off origin/main and open it
 #   start       turn a GitHub issue into a worktree, ready to plan
 #   config      locate (or print) the .sapa.yaml for the current stream
+#   tmp         print a per-stream scratch directory for the phase skills
 #   section     maintain a machine-managed section of a PR body or issue
 #   status      record the current stream's status for the window switcher
 #   watch       poll the current branch's PR and emit one line per change
@@ -26,7 +27,7 @@
 
 set -euo pipefail
 
-commands="bootstrap worktree start config section status watch teardown install uninstall completion"
+commands="bootstrap worktree start config tmp section status watch teardown install uninstall completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 

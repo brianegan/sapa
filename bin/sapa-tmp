@@ -1,0 +1,94 @@
+#!/bin/bash
+# sapa tmp — print a per-stream scratch directory, creating it on first use.
+#
+# The phase skills write intermediate files (a plan draft, a wrapped comment, a
+# fetched body) while they work. Fixed paths like /tmp/sapa-plan.md collide when
+# two streams run the same phase at once: one clobbers the other, or a coding
+# agent reads a plan that belongs to a different stream. This hands each stream
+# its own directory instead, keyed by the stream the way `sapa status` keys its
+# registry — the worktree basename, which equals the branch and is a single path
+# component, so it needs no sanitizing.
+#
+# The path is deterministic per stream, so a skill spanning several separate
+# command blocks recomputes the same directory each time (shell state does not
+# persist between them, so a mktemp-into-a-variable approach can't).
+#
+#   ${SAPA_TMP_DIR:-${TMPDIR:-/tmp}/sapa}/<worktree-basename>
+#
+# Run outside a sapa stream (a manual invocation of a phase skill), it falls back
+# to the basename of the git toplevel, or of $PWD when not in git — best-effort,
+# since parallel manual streams are the case that actually needs the guarantee.
+#
+# Usage:
+#   sapa tmp                 # print (and create) this stream's scratch dir
+#   sapa tmp --start DIR     # resolve the stream from DIR instead of $PWD
+
+set -euo pipefail
+
+start="${PWD:-$(pwd)}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --start)
+      shift
+      [ $# -gt 0 ] || { echo "sapa tmp: --start needs a directory" >&2; exit 2; }
+      start="$1"
+      ;;
+    -h|--help)
+      grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "sapa tmp: unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# Resolve start to an absolute path up front. A start that does not exist is a
+# hard error, not a silent fall-through: otherwise a typo'd --start would empty
+# `abs`, drop to the git fallback, and resolve from the caller's cwd — handing a
+# skill some *other* stream's scratch dir, the exact collision this tool exists
+# to prevent.
+if ! abs="$(cd "$start" 2>/dev/null && pwd)"; then
+  echo "sapa tmp: no such directory: $start" >&2
+  exit 2
+fi
+
+# Resolve the stream basename the same way sapa-status find_stream does: walk up
+# for the `.bare` project root, then take the path component directly below it.
+# Keep this in step with find_stream in bin/sapa-status.
+key=""
+dir="$abs"
+project_root=""
+while :; do
+  if [ -d "$dir/.bare" ]; then
+    project_root="$dir"
+    break
+  fi
+  parent="$(dirname "$dir")"
+  [ "$parent" = "$dir" ] && break
+  dir="$parent"
+done
+if [ -n "$project_root" ] && [ "$abs" != "$project_root" ]; then
+  rel="${abs#"$project_root"/}"
+  key="${rel%%/*}"          # first path component below the project root
+fi
+
+# Fallback when not inside a sapa worktree: the git toplevel's basename, or $abs's.
+if [ -z "$key" ]; then
+  if toplevel="$(git -C "$abs" rev-parse --show-toplevel 2>/dev/null)"; then
+    key="$(basename "$toplevel")"
+  else
+    key="$(basename "$abs")"
+  fi
+fi
+
+base="${SAPA_TMP_DIR:-}"
+if [ -z "$base" ]; then
+  tmpdir="${TMPDIR:-/tmp}"
+  base="${tmpdir%/}/sapa"    # strip $TMPDIR's trailing slash (macOS has one)
+fi
+base="${base%/}"
+out="$base/$key"
+
+mkdir -p "$out"
+echo "$out"

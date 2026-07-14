@@ -33,11 +33,14 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
 4. **Record it as an issue comment.** The plan goes in its own comment carrying
    the `sapa:plan` markers, never in the issue body.
 
-   Write the agreed plan, then find any existing sapa plan comment. `gh api`
-   returns the id directly and reads bodies in full:
+   Write the agreed plan, then find any existing sapa plan comment. Scratch files
+   go under `$(sapa tmp)`, this stream's own directory, so parallel streams never
+   clobber each other's drafts; the path is stable across commands, so you can
+   reuse `$(sapa tmp)/…` in each. `gh api` returns the id directly and reads
+   bodies in full:
 
    ```
-   printf '%s' "$PLAN_MARKDOWN" > /tmp/sapa-plan.md
+   printf '%s' "$PLAN_MARKDOWN" > "$(sapa tmp)/plan.md"
    gh api /repos/{owner}/{repo}/issues/<N>/comments --paginate \
      --jq '.[] | select(.body | contains("<!-- sapa:plan")) | .id'
    ```
@@ -48,16 +51,16 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
      post it (stderr status is `created`):
 
      ```
-     printf '' | sapa section plan --content-file /tmp/sapa-plan.md > /tmp/sapa-comment.md
-     gh issue comment <N> --body-file /tmp/sapa-comment.md
+     printf '' | sapa section plan --content-file "$(sapa tmp)/plan.md" > "$(sapa tmp)/comment.md"
+     gh issue comment <N> --body-file "$(sapa tmp)/comment.md"
      ```
 
    - **A sapa plan comment exists** — fetch its current body untruncated, then
      feed it through `sapa section` so the hash protection applies:
 
      ```
-     gh api /repos/{owner}/{repo}/issues/comments/<id> --jq .body > /tmp/sapa-existing.md
-     sapa section plan --content-file /tmp/sapa-plan.md --body-file /tmp/sapa-existing.md > /tmp/sapa-comment.md
+     gh api /repos/{owner}/{repo}/issues/comments/<id> --jq .body > "$(sapa tmp)/existing.md"
+     sapa section plan --content-file "$(sapa tmp)/plan.md" --body-file "$(sapa tmp)/existing.md" > "$(sapa tmp)/comment.md"
      ```
 
      `sapa section` exits non-zero (status 3, nothing on stdout) if that body is
@@ -71,7 +74,7 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
 
      ```
      gh api --method PATCH /repos/{owner}/{repo}/issues/comments/<id> \
-       -F body=@/tmp/sapa-comment.md
+       -F body=@"$(sapa tmp)/comment.md"
      ```
 
      If `locked` or `locked-edited`, the user has taken over the comment — leave
