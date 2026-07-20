@@ -19,4 +19,4 @@ gate:
     model: fable
   # ...or run a shell command (prefix with a version manager if needed).
   - name: test
-    run: bash tests/test_sapa_dispatch.sh && python3 tests/test_sapa_section.py && python3 tests/test_sapa_watch.py && python3 tests/test_sapa_status.py && bash tests/test_sapa_config.sh && bash tests/test_sapa_tmp.sh && bash tests/test_sapa_install.sh && bash tests/test_sapa_uninstall.sh && bash tests/test_sapa_completion.sh
+    run: bash tests/test_sapa_dispatch.sh && python3 tests/test_sapa_section.py && python3 tests/test_sapa_watch.py && python3 tests/test_sapa_status.py && python3 tests/test_skill_lint.py && bash tests/test_sapa_config.sh && bash tests/test_sapa_tmp.sh && bash tests/test_sapa_install.sh && bash tests/test_sapa_uninstall.sh && bash tests/test_sapa_completion.sh
