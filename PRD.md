@@ -373,6 +373,19 @@ me through my existing notification hook, which opens the right window on click.
 - **Prior art.** `no-mistakes` is the model: its `workflow_*_test.go` and recorded
   end-to-end fixtures drive the pipeline against fixture repos with recorded
   agent interactions. Imitate that fixture-driven, command-surface approach.
+- **Skill linter, not evals.** sapa's skills are preference skills — durable,
+  opinionated workflow — the kind worth protecting. A model-graded eval, though,
+  means running a model in CI: a paid API bill, or a free tier (GitHub Models)
+  that grades on a proxy model rather than the Claude the skills actually run on,
+  which is weak signal. At this prototype stage that cost is not worth it, so
+  model-graded triggering evals stay a maybe-later local script (run under an
+  existing Claude subscription), out of CI. What CI runs instead is a
+  deterministic linter of the `SKILL.md` files (`tests/test_skill_lint.py`,
+  wired into `tests/run.sh` and the gate): valid frontmatter with a name matching
+  its directory, a SKILL.md under 500 lines, a bounded description, and no two
+  skills claiming the same quoted trigger phrase. It is an internal test-suite
+  util, never a `sapa` subcommand. This adds a deterministic slice on top of the
+  observation-based verification above, not a replacement for it.
 
 ## Out of Scope
 
