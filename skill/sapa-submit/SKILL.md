@@ -54,18 +54,19 @@ Run `sapa config -p` and read these top-level keys (all optional):
      exercised with capability the reviewer has on their machine (integration
      tests behind their own keys), point them at running those. This is not a
      recap of the gate sapa already ran — that record is `## Gates`.
-   - `## Gates` — a bulleted list of the checks sapa ran on the branch: the gate
-     steps by name (from the config, e.g. review + test) and what the test step
-     covered (which suites, how many). This is the automated record — the recap
-     that `## Testing` deliberately leaves out — so a reviewer can see what is
-     already green at a glance without it crowding the reviewer-facing steps.
+   - `## Gates` — a bulleted list of the checks sapa ran on the branch, one
+     bullet per gate step (by name, from the config, e.g. review + test). Where a
+     step covers several things — a test step running many suites — break those
+     onto sub-bullets rather than cramming them into an inline parenthetical, so
+     the record stays scannable. This is the automated record — the recap that
+     `## Testing` deliberately leaves out — so a reviewer can see what is already
+     green at a glance without it crowding the reviewer-facing steps.
 
 3. Build the PR body in a managed section so it is protected from the start.
    Write the composed `## Summary` / `## Changes` / `## Testing` / `## Gates`
    markdown to `$(sapa tmp)/pr.md` — this stream's own scratch directory, so
-   parallel streams
-   don't clobber each other, and the path is stable across the commands below —
-   then wrap it:
+   parallel streams don't clobber each other, and the path is stable across the
+   commands below — then wrap it:
 
    ```
    printf '' | sapa section pr-description --content-file "$(sapa tmp)/pr.md" > "$(sapa tmp)/pr-body.md"
