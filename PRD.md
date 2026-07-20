@@ -204,9 +204,13 @@ me through my existing notification hook, which opens the right window on click.
   the same way. The title is Conventional Commits — `<type>: <imperative
   summary>` (`feat|fix|docs|refactor|test|chore`), no issue number, since it
   becomes the squash-merge commit title. The body is an execution summary of what
-  shipped, not a repeat of the plan, in three sections: `## Summary` (what
-  changed and why), `## Changes` (notable changes, omitted for trivial ones), and
-  `## Testing` (how it was verified). `Closes #N` sits outside the managed section
+  shipped, not a repeat of the plan, in four sections: `## Summary` (what
+  changed and why), `## Changes` (notable changes, omitted for trivial ones),
+  `## Testing` (how a reviewer can best test the change themselves, scaled to the
+  change — green lights for a mechanical one, navigation steps for a
+  human-perceived one), and `## Gates` (the automated record — the gate steps and
+  tests sapa ran — kept out of `## Testing` so the reviewer-facing steps stay
+  uncluttered). `Closes #N` sits outside the managed section
   so it survives after a human locks the body.
 - **Watcher wake model.** The background poller checks CI and comments on an
   interval with back-off and only wakes the session when state changes. The
