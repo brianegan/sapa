@@ -39,7 +39,7 @@ Run `sapa config -p` and read these top-level keys (all optional):
    the work.
 
    **Body** — an execution summary of what shipped, never a repeat of the plan
-   (the plan lives on the issue). Three sections, in this order:
+   (the plan lives on the issue). Four sections, in this order:
 
    - `## Summary` — 1-3 sentences: what changed and why.
    - `## Changes` — a short bullet list of the notable changes. Omit the whole
@@ -53,11 +53,17 @@ Run `sapa config -p` and read these top-level keys (all optional):
      the thing — how to navigate to it and what to look for. When it is best
      exercised with capability the reviewer has on their machine (integration
      tests behind their own keys), point them at running those. This is not a
-     recap of the gate sapa already ran.
+     recap of the gate sapa already ran — that record is `## Gates`.
+   - `## Gates` — a bulleted list of the checks sapa ran on the branch: the gate
+     steps by name (from the config, e.g. review + test) and what the test step
+     covered (which suites, how many). This is the automated record — the recap
+     that `## Testing` deliberately leaves out — so a reviewer can see what is
+     already green at a glance without it crowding the reviewer-facing steps.
 
 3. Build the PR body in a managed section so it is protected from the start.
-   Write the composed `## Summary` / `## Changes` / `## Testing` markdown to
-   `$(sapa tmp)/pr.md` — this stream's own scratch directory, so parallel streams
+   Write the composed `## Summary` / `## Changes` / `## Testing` / `## Gates`
+   markdown to `$(sapa tmp)/pr.md` — this stream's own scratch directory, so
+   parallel streams
    don't clobber each other, and the path is stable across the commands below —
    then wrap it:
 
