@@ -44,8 +44,16 @@ Run `sapa config -p` and read these top-level keys (all optional):
    - `## Summary` — 1-3 sentences: what changed and why.
    - `## Changes` — a short bullet list of the notable changes. Omit the whole
      section for a trivial change the summary already covers.
-   - `## Testing` — how it was verified: name the gate steps that ran (from the
-     config, e.g. review + tests) and any manual checks.
+   - `## Testing` — answer one question from the reviewer's chair: *if I were
+     testing this change, what is the best way?* Write what earns them
+     confidence, and let it scale to the change — force no ceremony. For a
+     mechanical change (a rename, a pure refactor) that is simply "the tests pass
+     and the lights are green"; say that rather than invent steps. For a
+     human-perceived change (an animation, a layout or copy tweak) guide them to
+     the thing — how to navigate to it and what to look for. When it is best
+     exercised with capability the reviewer has on their machine (integration
+     tests behind their own keys), point them at running those. This is not a
+     recap of the gate sapa already ran.
 
 3. Build the PR body in a managed section so it is protected from the start.
    Write the composed `## Summary` / `## Changes` / `## Testing` markdown to
