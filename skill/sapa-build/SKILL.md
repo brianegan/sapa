@@ -31,6 +31,21 @@ build` (best-effort — it no-ops outside a sapa stream and never needs your inp
    plan can't land in the file you read back. The command exits non-zero (nothing
    printed) when no plan comment has been recorded yet — if so, stop and say the
    plan has not been recorded (run `/sapa-plan` first).
-2. **Implement.** Write the code and tests the plan calls for, in this working
-   tree. A recorded plan is an accepted plan — build what the comment says. Then
-   stop; `/sapa-gate` runs the checks next.
+2. **Require a task list.** The recorded plan carries a `## Tasks` section — a
+   numbered list of independently-verifiable units, each with a `Done when:`
+   acceptance criterion (recorded by `/sapa-plan`). If the plan you read has no
+   `## Tasks` section, stop and say so: the plan predates the task format or came
+   from elsewhere, and it needs re-recording with `/sapa-plan` before build. Do not
+   fall back to a single-pass build — the task list is the build contract.
+3. **Implement one task at a time.** A recorded plan is an accepted plan, so build
+   what the comment says — but work through the tasks in order, not all at once.
+   For each task: implement what it calls for in this working tree, then verify it
+   against its `Done when:` criterion before starting the next. Verifying means a
+   passing test when the task is code — write the test and reach green — and the
+   most direct check that the criterion holds when it is not (the file now says X,
+   the command now behaves Y). A verified task is a durable checkpoint, so when
+   something breaks after several tasks the failure localizes to the task just
+   finished rather than the whole branch. This stays a single-session build: no
+   subagents, no per-task dispatch — just the cadence of reaching green on each
+   task before moving to the next. When every task is verified, stop; `/sapa-gate`
+   runs the checks next.

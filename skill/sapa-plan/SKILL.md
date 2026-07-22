@@ -42,21 +42,50 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    finds sapa's comment (by its marker), creates it if absent, and overwrites it if
    present.
 
-   Record one comment with two parts: the **plan** (intent and decisions, as
-   above), followed by a **`Decisions & Discussions`** section that captures *why*
-   the plan looks the way it does — the key choices and their rationale ("chose X
-   over Y because Z") plus the notable questions planning surfaced and how they
-   resolved. If the planning skill ran a discussion (for example grill-with-docs),
-   distil its questions and answers here. Distil, do not transcribe: the value is
-   the reasoning a later reader needs to understand the feature, not a verbatim
-   log. This section is what makes the recorded plan explain itself once the
-   session is gone.
+   Record one comment with three parts, in order: the **plan intent** (a short
+   prose statement of what the change accomplishes and why — the at-a-glance
+   target, not file-by-file code), a **`## Tasks`** section (below), and a
+   **`## Decisions & Discussions`** section that captures *why* the plan looks the
+   way it does — the key choices and their rationale ("chose X over Y because Z")
+   plus the notable questions planning surfaced and how they resolved. If the
+   planning skill ran a discussion (for example grill-with-docs), distil its
+   questions and answers here. Distil, do not transcribe: the value is the
+   reasoning a later reader needs to understand the feature, not a verbatim log.
+   This section is what makes the recorded plan explain itself once the session is
+   gone.
+
+   The **`## Tasks`** section is a numbered list of independently-verifiable units
+   of work, sitting between the intent and `Decisions & Discussions`. Each task is a
+   bold title line saying what it touches and what it should do, followed by one
+   `Done when:` line stating its acceptance criterion as a checkable observation —
+   the task's red-green target and the requirement a spec review can cite against a
+   named task rather than infer from prose. Keep the task the unit of verification:
+   `sapa-build` implements and verifies one task before starting the next, so each
+   task should be something you can reach green on its own. Always include the
+   section, even when the work is a single task — a one-task plan is a one-item
+   list, not a reason to drop the heading. Never pad the list to reach an imagined
+   minimum: the work decides the count, one task upward.
 
    The content format depends on the backend, because GitHub renders markdown and
    Jira renders ADF:
 
-   - **GitHub** — write the plan as markdown, ending with the
-     `## Decisions & Discussions` section:
+   - **GitHub** — write the plan as markdown with the three parts in order: intent
+     prose, `## Tasks`, then `## Decisions & Discussions`:
+
+     ```
+     One or two sentences on what this change accomplishes and why.
+
+     ## Tasks
+
+     1. **What this task touches and does** — a sentence of detail if it needs one.
+        - *Done when:* the checkable observation that proves this task is complete.
+
+     ## Decisions & Discussions
+
+     - Chose X over Y because Z.
+     ```
+
+     Then hand it to the helper:
 
      ```
      printf '%s' "$PLAN_MARKDOWN" > "$(sapa tmp)/plan.md"
@@ -68,15 +97,21 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
      `{"type":"doc","version":1,"content":[…]}` object using `heading`,
      `paragraph`, `bulletList`/`orderedList` (each `listItem` wrapping a
      `paragraph`), and `codeBlock` nodes, with `strong`/`em` marks for emphasis.
-     End with a `Decisions & Discussions` heading and its bullets:
+     Use the same three parts: an intent paragraph, a `Tasks` heading over an
+     `orderedList` (each task's `Done when:` label carried as a `strong` mark), then
+     a `Decisions & Discussions` heading and its bullets:
 
      ```
      cat > "$(sapa tmp)/plan.adf.json" <<'JSON'
      {"type":"doc","version":1,"content":[
        {"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Goal"}]},
-       {"type":"paragraph","content":[{"type":"text","text":"…"}]},
-       {"type":"bulletList","content":[
-         {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"…"}]}]}
+       {"type":"paragraph","content":[{"type":"text","text":"What this change accomplishes and why."}]},
+       {"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Tasks"}]},
+       {"type":"orderedList","content":[
+         {"type":"listItem","content":[
+           {"type":"paragraph","content":[{"type":"text","text":"What this task touches and does."}]},
+           {"type":"paragraph","content":[{"type":"text","text":"Done when: ","marks":[{"type":"strong"}]},{"type":"text","text":"the checkable observation that proves it complete."}]}
+         ]}
        ]},
        {"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Decisions & Discussions"}]},
        {"type":"bulletList","content":[
