@@ -98,14 +98,39 @@ empty result (the branch matches the base) is fine — the variables come throug
 empty. This contract applies to `run:` steps only; a `skill:` step invokes a
 skill rather than a shell, so the variables do not apply to it.
 
+Every `skill:` step gets the accepted plan as its spec source, the way this gate
+already gives `run:` steps the diff. In the flow the plan is always recorded
+before the gate, so materialize it once — mirroring how `sapa-build` reads it:
+
+```
+sapa issue plan-comment --read > "$(sapa tmp)/plan.md"
+```
+
+Exit 0 means the plan is present at that path; exit 3 means no plan comment is
+recorded — an anomaly in the flow, handled below. The redirect still leaves an
+empty `plan.md` behind on exit 3, so decide plan-present by the exit status, not
+by the file existing. Whichever invocation path a `skill:` step takes, its prompt
+must tell the skill the accepted spec for this change is at that path — resolved
+to an absolute path, so a sub-agent reading it need not re-expand `$(sapa tmp)`
+itself — and to use it as the spec source rather than discovering one itself, and
+pass the path as the skill's argument too for skills that read args. This keeps the contract skill-agnostic: any review skill that accepts a
+spec path then reviews against the plan, not against a guessed surface such as
+the untouched issue body. If exit 3 — no plan comment — say so in the step prompt
+so the skill reports its spec axis honestly rather than degrading to "no spec
+available" silently, and surface a visible warning in the gate report that
+spec-compliance did not run: a green gate must never imply the spec was checked
+when it was not. Do not hard-fail the step on a missing plan; `/sapa-gate` is
+legitimately runnable standalone before a plan is recorded.
+
 When a `skill:` step names a `model:`, run that step inside a single sub-agent
 pinned to that model via the Agent tool's model override. The sub-agent's
-prompt: invoke that skill against the diff `<remote>/<base>...HEAD` and return
-its findings verbatim. Treat the sub-agent's findings as the step result,
-exactly as an in-session skill invocation would be. Sub-agents the skill itself
-spawns inherit the pinned model, so a review skill's parallel reviewers run on
-it too. Without `model:`, invoke the skill in-session — today's behaviour,
-unchanged.
+prompt: invoke that skill against the diff `<remote>/<base>...HEAD`, using the
+materialized plan file (its resolved absolute path) as the spec source, and
+return its findings verbatim. Treat the sub-agent's findings as the step result, exactly as an
+in-session skill invocation would be. Sub-agents the skill itself spawns inherit
+the pinned model, so a review skill's parallel reviewers run on it too. Without
+`model:`, invoke the skill in-session with the same spec path — today's
+behaviour, extended only to carry the plan.
 
 - All steps pass → report the branch is green and stop. `/sapa-submit` ships it
   next.
