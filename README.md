@@ -36,8 +36,13 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   the rest of sapa expects.
 - `sapa worktree` — spin up a per-branch worktree off `origin/main` and open
   it in your editor (`$EDITOR`).
-- `sapa start` — turn an issue number into a worktree ready to plan (derives
-  the branch name from the issue title and calls `sapa worktree`).
+- `sapa start` — turn an issue into a worktree ready to plan (derives the branch
+  name from the issue title and calls `sapa worktree`). Takes a GitHub number
+  (`42`) or a Jira key (`gp-1`); the key is kept in the branch name.
+- `sapa issue` — derive the issue identity from the branch (`sapa issue key`) and
+  record or read the plan comment (`sapa issue plan-comment`), against GitHub
+  (`gh`) or Jira (`acli`) per the `tracker` config. The gh-vs-acli branch lives
+  here so the phase skills stay backend-agnostic.
 - `sapa config` — find the project's `.sapa.yaml` by walking up, the way
   `sapa worktree` finds `.bare`.
 - `sapa tmp` — print (creating on first use) a scratch directory scoped to the
@@ -132,6 +137,21 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
+- `tracker:` — the issue backend, `github` (default) or `jira`. On `github`, sapa
+  reads issues and records the plan through `gh`, and PRs link the issue with
+  `Closes #N`. On `jira`, it reads issues and records the plan through the
+  Atlassian CLI (`acli`); PRs still live on GitHub and link the issue by URL. The
+  Jira key is kept in the branch (`gp-1-…`), so Jira's dev panel back-links the PR.
+- `jira:` — Jira settings, used only when `tracker: jira`. `site:` is the Jira
+  host, used to build the PR's issue link; `project:` is optional and lets a bare
+  `sapa start 1` expand to that project's key (`GP-1`).
+
+  ```yaml
+  tracker: jira
+  jira:
+    site: verygood-ventures.atlassian.net
+    project: GP
+  ```
 - `close_window:` — after teardown removes a merged stream's worktree, close the
   VS Code window that was open on it (default on; set `false` to keep it open).
   macOS + VS Code only and best-effort: it presses the close button of the one

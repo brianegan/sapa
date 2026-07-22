@@ -3,6 +3,13 @@ base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
 plan: grill-with-docs
+# Issue backend. `github` (default) reads issues and records the plan on GitHub;
+# `jira` uses the Atlassian CLI (acli) and keeps PRs on GitHub. sapa's own repo
+# uses GitHub, so this is left at the default and shown here only as reference:
+#   tracker: jira
+#   jira:
+#     site: verygood-ventures.atlassian.net   # only to build the PR's issue link
+#     project: GP                             # lets `sapa start 1` mean GP-1
 # How `sapa watch` decides a branch is behind its base.
 #   protection (default) — only on mergeStateStatus BEHIND, which needs a
 #     "require branches up to date" protection rule.
@@ -19,4 +26,4 @@ gate:
     model: fable
   # ...or run a shell command (prefix with a version manager if needed).
   - name: test
-    run: bash tests/test_sapa_dispatch.sh && python3 tests/test_sapa_section.py && python3 tests/test_sapa_watch.py && python3 tests/test_sapa_status.py && python3 tests/test_skill_lint.py && bash tests/test_sapa_config.sh && bash tests/test_sapa_tmp.sh && bash tests/test_sapa_install.sh && bash tests/test_sapa_uninstall.sh && bash tests/test_sapa_completion.sh
+    run: bash tests/test_sapa_dispatch.sh && python3 tests/test_sapa_section.py && python3 tests/test_sapa_issue.py && python3 tests/test_sapa_watch.py && python3 tests/test_sapa_status.py && python3 tests/test_skill_lint.py && bash tests/test_sapa_config.sh && bash tests/test_sapa_start.sh && bash tests/test_sapa_tmp.sh && bash tests/test_sapa_install.sh && bash tests/test_sapa_uninstall.sh && bash tests/test_sapa_completion.sh

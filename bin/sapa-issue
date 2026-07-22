@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""sapa issue — backend-aware issue identity and plan-comment plumbing.
+
+Sapa reads a stream's issue from, and records its plan to, one of two backends:
+GitHub (through `gh`) or Jira (through the Atlassian CLI, `acli`). Which backend
+is in play is read from the branch name, which `sapa start` makes
+self-describing:
+
+  * a leading integer  — `42-add-widget`      — is a GitHub issue number (42);
+  * a leading key      — `gp-1-add-widget`    — is a Jira work-item key (GP-1).
+
+So no config parsing lives here: the branch already says which backend and which
+issue, and every phase derives the same answer the same way. This helper owns the
+mechanical, identical-every-session half — deriving the identity and finding /
+creating / updating the plan comment — so the phase skills stay thin and the
+gh-vs-acli branch is written and tested once rather than in four SKILL.md files.
+
+The plan comment is no longer edit-locked (on either backend): sapa finds its own
+comment by an identity marker and overwrites it. The marker is the only thing that
+survives — no content hash, no lock.
+
+  * GitHub — an invisible HTML-comment marker, `<!-- sapa:plan -->` …
+    `<!-- /sapa:plan -->`, wrapping markdown. Found by substring.
+  * Jira — a visible sentinel text node carrying the `sapa:plan` token, prepended
+    to the ADF the caller supplies. acli renders ADF; its `--json` readback
+    flattens to plain text, which still carries the token, so the comment is found
+    the same way.
+
+Subcommands:
+    sapa issue key [--branch NAME] [--start DIR]
+        Print the GitHub number or Jira key for the current branch.
+
+    sapa issue plan-comment --content-file F [--branch NAME] [--start DIR]
+        Create or update the plan comment from F, overwriting it in place (found
+        by its identity marker). On GitHub F is markdown; on Jira F is ADF JSON.
+        Prints a one-word status to stderr: `created` or `updated`.
+
+    sapa issue plan-comment --read [--branch NAME] [--start DIR]
+        Print the current plan comment body. Exits 3 (nothing on stdout) if no
+        plan comment has been recorded yet, so a caller can tell "not planned".
+
+`--branch` overrides branch detection (mainly for tests and scripts); `--start`
+locates the git repo from a directory other than the cwd. `gh` resolves the
+repo, and `acli` its site, from their own auth and the working directory.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tempfile
+
+# The identity token. On GitHub it lives inside the HTML-comment marker; on Jira
+# it rides in a visible sentinel line. Either way it is what "which comment is
+# sapa's" is matched on, so it must be stable and unlikely to appear by accident.
+PLAN_TOKEN = "sapa:plan"
+GH_OPEN = f"<!-- {PLAN_TOKEN} -->"
+GH_CLOSE = f"<!-- /{PLAN_TOKEN} -->"
+# Match the opening marker by prefix, not exactly, so a comment written by an
+# older sapa (which carried a `hash=…` attribute, `<!-- sapa:plan hash=… -->`) is
+# still found and overwritten rather than duplicated. This is the same prefix the
+# earlier skills searched on.
+GH_FIND = f"<!-- {PLAN_TOKEN}"
+JIRA_SENTINEL = f"🤖 Sapa plan · managed comment · {PLAN_TOKEN}"
+
+
+def run(cmd, *, input_text=None, check=True):
+    """Run a command, returning its stdout. Raises on non-zero when check."""
+    proc = subprocess.run(
+        cmd, input=input_text, capture_output=True, text=True
+    )
+    if check and proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        raise SystemExit(f"sapa issue: `{cmd[0]} {cmd[1] if len(cmd) > 1 else ''}` "
+                         f"failed (exit {proc.returncode})")
+    return proc.stdout
+
+
+def current_branch(start, override):
+    if override:
+        return override
+    out = run(["git", "-C", start, "rev-parse", "--abbrev-ref", "HEAD"])
+    return out.strip()
+
+
+def derive_identity(branch):
+    """Return (backend, ident) from the branch name.
+
+    Jira wins on shape: a leading `<letter><alnum>*-<digits>` segment is a key
+    (upper-cased); otherwise a leading run of digits is a GitHub number. `sapa
+    start` guarantees a Jira branch keeps its key prefix, so the shapes never
+    collide (a GitHub branch always leads with digits).
+    """
+    m = re.match(r"^([A-Za-z][A-Za-z0-9]*-[0-9]+)(?:-|$)", branch)
+    if m:
+        return "jira", m.group(1).upper()
+    m = re.match(r"^([0-9]+)(?:-|$)", branch)
+    if m:
+        return "github", m.group(1)
+    raise SystemExit(
+        f"sapa issue: cannot derive an issue from branch '{branch}': expected a "
+        f"leading issue number (42-…) or Jira key (gp-1-…)")
+
+
+# --- GitHub -----------------------------------------------------------------
+
+def gh_find_id(number):
+    out = run([
+        "gh", "api", f"/repos/{{owner}}/{{repo}}/issues/{number}/comments",
+        "--paginate", "--jq",
+        f'.[] | select(.body | contains("{GH_FIND}")) | .id',
+    ])
+    ids = out.split()
+    return ids[0] if ids else ""
+
+
+def gh_body(comment_id):
+    return run([
+        "gh", "api", f"/repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+        "--jq", ".body",
+    ])
+
+
+def gh_write(number, content):
+    body = f"{GH_OPEN}\n{content.strip()}\n{GH_CLOSE}\n"
+    comment_id = gh_find_id(number)
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=True) as f:
+        f.write(body)
+        f.flush()
+        if comment_id:
+            run(["gh", "api", "--method", "PATCH",
+                 f"/repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+                 "-F", f"body=@{f.name}"])
+            return "updated"
+        run(["gh", "issue", "comment", number, "--body-file", f.name])
+        return "created"
+
+
+def gh_read(number):
+    comment_id = gh_find_id(number)
+    if not comment_id:
+        return None
+    return gh_body(comment_id)
+
+
+# --- Jira --------------------------------------------------------------------
+#
+# We read comments through `acli jira workitem view --fields comment --json`, not
+# `comment list --json`: the former returns each comment's full ADF body, while
+# the latter flattens to plain text and silently drops list items — so a plan read
+# back through `comment list` would lose most of its bullets. The view carries the
+# comment `id` too, so one call serves both finding-to-update and reading.
+
+
+def adf_text(node):
+    """Flatten an ADF node to readable plain text, faithfully enough for a plan.
+
+    Handles the block types a plan uses — paragraphs, headings, bullet/ordered
+    lists, and code — because acli's own flattening drops list content.
+    """
+    t = node.get("type")
+    if t == "text":
+        return node.get("text", "")
+    if t == "hardBreak":
+        return "\n"
+    children = node.get("content", []) or []
+    if t in ("paragraph", "heading", "codeBlock"):
+        return "".join(adf_text(c) for c in children)
+    if t == "listItem":
+        return "\n".join(adf_text(c) for c in children).strip()
+    if t in ("bulletList", "orderedList"):
+        lines = []
+        for i, li in enumerate(children, 1):
+            marker = "- " if t == "bulletList" else f"{i}. "
+            first, *rest = adf_text(li).split("\n")
+            lines.append(marker + first)
+            lines.extend("  " + r for r in rest)
+        return "\n".join(lines)
+    # doc and any other container: block children separated by blank lines.
+    parts = [adf_text(c) for c in children]
+    return "\n\n".join(p for p in parts if p != "")
+
+
+def jira_comments(key):
+    out = run(["acli", "jira", "workitem", "view", key,
+               "--json", "--fields", "comment"])
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        raise SystemExit("sapa issue: could not parse acli view output")
+    return (data.get("fields") or {}).get("comment", {}).get("comments", []) or []
+
+
+def jira_body_text(comment):
+    body = comment.get("body")
+    if isinstance(body, dict):
+        return adf_text(body)
+    return body or ""
+
+
+def jira_marked(key):
+    """Plan comments (carrying the token), newest first — Jira ids grow with time.
+
+    Newest-first means a read always reflects the latest write even if a prior
+    reconcile left a straggler, and the write below sweeps those stragglers up.
+    """
+    marked = [c for c in jira_comments(key) if PLAN_TOKEN in jira_body_text(c)]
+    return sorted(marked, key=lambda c: int(c.get("id", 0)), reverse=True)
+
+
+def jira_inject_marker(content):
+    """Prepend the visible sentinel node to the caller's ADF document."""
+    try:
+        doc = json.loads(content)
+    except json.JSONDecodeError:
+        raise SystemExit(
+            "sapa issue: --content-file must be an ADF JSON document on the Jira "
+            "path (a {\"type\":\"doc\",\"version\":1,\"content\":[…]} object)")
+    if not isinstance(doc, dict) or doc.get("type") != "doc" \
+            or not isinstance(doc.get("content"), list):
+        raise SystemExit(
+            "sapa issue: ADF content must be a doc object with a content array")
+    sentinel = {"type": "paragraph",
+                "content": [{"type": "text", "text": JIRA_SENTINEL}]}
+    doc["content"] = [sentinel] + doc["content"]
+    return json.dumps(doc)
+
+
+def jira_write(key, content):
+    """Create a fresh plan comment and delete any prior ones.
+
+    We cannot update in place: acli's `comment update` stores its body as plain
+    text and drops the ADF, so only `comment create` renders rich. We create the
+    new comment first — a failure then leaves the old plan intact rather than
+    orphaning it — then delete the stragglers. The comment id churns on each
+    write, but sapa finds it by marker, so nothing downstream depends on the id.
+    """
+    body = jira_inject_marker(content)
+    existing = jira_marked(key)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=True) as f:
+        f.write(body)
+        f.flush()
+        run(["acli", "jira", "workitem", "comment", "create",
+             "--key", key, "--body-file", f.name])
+    for c in existing:
+        run(["acli", "jira", "workitem", "comment", "delete",
+             "--key", key, "--id", str(c["id"])])
+    return "updated" if existing else "created"
+
+
+def jira_read(key):
+    for c in jira_marked(key):
+        body = c.get("body")
+        if isinstance(body, dict):
+            # Drop the leading sentinel node so the read is just the plan.
+            content = body.get("content") or []
+            if content and PLAN_TOKEN in adf_text(content[0]):
+                body = {**body, "content": content[1:]}
+            return adf_text(body)
+        if isinstance(body, str):
+            return body
+    return None
+
+
+# --- dispatch ----------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(prog="sapa issue", add_help=True)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # --branch (override detection; mainly tests/scripts) and --start (locate the
+    # repo elsewhere) are shared by every subcommand, so factor them into a parent.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--branch")
+    common.add_argument("--start", default=".")
+
+    sub.add_parser("key", parents=[common],
+                   help="print the issue number or Jira key")
+
+    p_pc = sub.add_parser("plan-comment", parents=[common],
+                          help="record or read the plan comment")
+    p_pc.add_argument("--content-file")
+    p_pc.add_argument("--read", action="store_true")
+
+    args = parser.parse_args()
+    branch = current_branch(args.start, args.branch)
+    backend, ident = derive_identity(branch)
+
+    if args.cmd == "key":
+        print(ident)
+        return 0
+
+    # plan-comment
+    if args.read:
+        body = gh_read(ident) if backend == "github" else jira_read(ident)
+        if body is None:
+            return 3
+        sys.stdout.write(body if body.endswith("\n") else body + "\n")
+        return 0
+
+    if not args.content_file:
+        parser.error("plan-comment needs --content-file (to write) or --read")
+    with open(args.content_file, "r", encoding="utf-8") as f:
+        content = f.read()
+    if backend == "github":
+        status = gh_write(ident, content)
+    else:
+        status = jira_write(ident, content)
+    sys.stderr.write(status + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

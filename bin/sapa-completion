@@ -89,7 +89,14 @@ $pairs
   case "\${words[2]}" in
     bootstrap)  _alternative 'modes:mode:((init\:"start a fresh local repo"))' 'repo:repository url: ' ;;
     worktree)   _arguments ':branch name: ' '::start-point:__sapa_git_refs' ;;
-    start)      _arguments '--title[skip the gh lookup]:title: ' '--print[print the branch, do not run sapa worktree]' '--start[start point]:start-point:__sapa_git_refs' ':issue number: ' '::start-point:__sapa_git_refs' ;;
+    start)      _arguments '--title[skip the tracker lookup]:title: ' '--print[print the branch, do not run sapa worktree]' '--start[start point]:start-point:__sapa_git_refs' ':issue (number or Jira key): ' '::start-point:__sapa_git_refs' ;;
+    issue)
+      if (( CURRENT == 3 )); then
+        _values 'subcommand' 'key[print the issue number or Jira key]' 'plan-comment[record or read the plan comment]'
+      else
+        _arguments '--content-file[plan content to record]:file:_files' '--read[print the current plan comment]' '--branch[override branch detection]:branch: ' '--start[locate the git repo from here]:directory:_files -/'
+      fi
+      ;;
     config)     _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/' ;;
     tmp)        _arguments '--start[resolve the stream from here]:directory:_files -/' ;;
     section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
