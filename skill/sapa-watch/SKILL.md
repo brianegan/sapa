@@ -53,15 +53,45 @@ base.
     its content here and escalate through the notification hook so clicking it
     opens this window, then handle it in the chat. GitHub is not the reply
     surface for your own words; this session is.
-  - **`other`** — a colleague. Decide:
-    - Mechanical (rename, typo, obvious small fix): make the change, push, and
-      reply on GitHub that it is done.
-    - Subjective or a judgement call: do not guess. Escalate to the user through
-      the notification hook so clicking it opens this window, and wait.
+  - **`other`** — a colleague. Do not act on the comment yet. Receive it first,
+    then route — "looks mechanical" is not "is correct," and an agent's default is
+    to agree with a confident reviewer, so correctness needs an explicit step or
+    it is skipped silently.
+    1. **Understand it.** If it is ambiguous, do not implement on a partial
+       reading. Resolve it through the routing below rather than guessing.
+    2. **Verify it against the codebase.** Is it correct for this stack? Does it
+       break existing behavior? Is there a reason the code is written the way it
+       is? A rename, a dead-code removal, or a "this is redundant" can still rest
+       on context the reviewer did not have. For "implement X" / "add X"
+       suggestions, grep for actual usage first: if nothing uses it, propose
+       removing it rather than building it.
+    3. **Route on the outcome:**
+       - **Correct and a simple, reasonable change** (rename, typo, an obvious
+         small fix that verifies clean): make the change, push, and reply on
+         GitHub that it is done.
+       - **Correct but a judgement call** — it changes the approach, or it
+         contradicts the recorded plan in a non-trivial way: do not guess, and do
+         not silently rewrite the plan to match the reviewer. Escalate to the user
+         through the notification hook so clicking it opens this window, and wait.
+         A comment that contradicts the accepted plan is a judgement call, not an
+         instruction.
+       - **Incorrect**: reply on the thread with technical reasoning, citing the
+         specific test, code, or constraint that shows why, rather than
+         implementing it or punting it. This pushback is autonomous but gated on
+         verification — post it directly only when a concrete artifact backs it. A
+         softer "I would have done it differently" is not "incorrect"; that is a
+         judgement call, so escalate instead. If the pushback later proves wrong,
+         correct it factually and implement — no long apology.
+       - **Cannot verify without more information**: ask rather than proceeding
+         anyway, routed by who holds the answer. If the reviewer can resolve it (an
+         ambiguous comment, or intent only they know), ask on the thread. If only
+         the developer would know (product intent, why the plan chose this,
+         context not in the code), escalate through the notification hook.
 
-    Any reply you post to an `other` comment goes out under your gh account, so
-    lead it with an attribution line so the colleague knows it is your agent, not
-    you typing:
+    Any reply you post to an `other` comment — done, pushback, or a clarifying
+    question — goes out under your gh account, so lead it with an attribution line
+    so the colleague knows it is your agent, not you typing, and that they are
+    talking to sapa:
 
     ```
     🤖 _Sapa Workflow, on @<your-login>'s behalf:_
@@ -70,10 +100,17 @@ base.
     ```
 
     `<your-login>` is the authenticated gh user (`gh api user --jq .login`).
-  - Either marker: if it changes the approach, refresh the plan comment on the
-    issue by re-running `/sapa-plan` step 4 — re-author the plan (markdown for
-    GitHub, ADF for Jira) and record it with `sapa issue plan-comment`, which
-    overwrites sapa's own comment in place. Never touch the issue body. If you
+    Lead the body with the fix or the reasoning: no performative agreement, no
+    thanks ("great catch!"). Keep the body technical.
+  - Refreshing the plan: when a change you make or sanction alters what the
+    recorded plan says — your own `self` decision, an `other` comment you routed
+    as a correct, reasonable change, or a judgement call the developer resolved in
+    favor of the change — refresh the plan comment on the issue by re-running
+    `/sapa-plan` step 4: re-author the plan (markdown for GitHub, ADF for Jira) and
+    record it with `sapa issue plan-comment`, which overwrites sapa's own comment
+    in place. Never touch the issue body. Never refresh the plan to match a
+    colleague comment on its own — a comment that changes the approach escalates
+    first (above), and the plan changes only once the developer agrees. If you
     reached for the whole `/sapa-plan` skill rather than just its step 4, it will
     have written `stage: plan`; re-run `sapa status --stage watch` afterward to
     restore this stage.
