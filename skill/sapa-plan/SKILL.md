@@ -36,6 +36,23 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    approach here. Either way keep the plan about intent and decisions, not
    file-by-file code, and always continue to step 4 — recording it on the issue
    is sapa's durable value no matter who developed the plan.
+
+   **Before writing the task list, surface the decisions the issue leaves open.**
+   A refined issue settles most of the WHAT, but it rarely settles all of it — it
+   often leaves a WHAT-level decision open that only surfaces when you work out the
+   HOW. "Add rate limiting" without saying per-user or per-IP, sliding or fixed
+   window, is a WHAT-gap wearing a HOW-detail costume. Identify those gaps and
+   surface them to the developer as questions rather than quietly picking an answer
+   and writing it into the plan as if the issue had asked for it — a silent wrong
+   assumption flows through the tasks, their acceptance criteria, and the build,
+   and per-task verification will not catch it because the plan itself rests on it.
+   Distinguish a genuine WHAT-gap, which needs a decision, from a HOW-detail you can
+   reasonably choose on your own; only the former gets surfaced, and a settled,
+   unambiguous issue produces no questions at all — stay quiet when nothing is open.
+   If a configured `plan:` skill is running the discussion, that skill owns this
+   surfacing (grilling naturally does it); otherwise ask here. Carry each
+   resolution and its rationale into the `## Decisions & Discussions` section in
+   step 4.
 4. **Record it as an issue comment.** Write the agreed plan to a file under
    `$(sapa tmp)` — this stream's own scratch directory, so parallel streams never
    clobber each other's drafts — then hand it to `sapa issue plan-comment`, which
@@ -47,7 +64,8 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    target, not file-by-file code), a **`## Tasks`** section (below), and a
    **`## Decisions & Discussions`** section that captures *why* the plan looks the
    way it does — the key choices and their rationale ("chose X over Y because Z")
-   plus the notable questions planning surfaced and how they resolved. If the
+   plus the notable questions planning surfaced and how they resolved, including
+   the WHAT-level decisions step 3 surfaced and the answer each one got. If the
    planning skill ran a discussion (for example grill-with-docs), distil its
    questions and answers here. Distil, do not transcribe: the value is the
    reasoning a later reader needs to understand the feature, not a verbatim log.
