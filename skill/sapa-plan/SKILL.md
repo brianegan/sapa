@@ -5,8 +5,9 @@ description: Read a stream's issue (GitHub or Jira), agree a plan, and record it
 
 # sapa-plan
 
-Turn the stream's issue into an agreed plan, recorded on the issue as a dedicated
-comment so it is durable and visible rather than trapped in this session.
+Turn the stream's issue into an agreed plan — and the decisions and discussion
+behind it — recorded on the issue as a dedicated comment so both are durable and
+visible rather than trapped in this session.
 
 Rules (always): the configured remote (default `origin`) is the only remote. The
 issue lives on GitHub (through `gh`) or Jira (through `acli`); which one is set by
@@ -39,10 +40,23 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    `$(sapa tmp)` — this stream's own scratch directory, so parallel streams never
    clobber each other's drafts — then hand it to `sapa issue plan-comment`, which
    finds sapa's comment (by its marker), creates it if absent, and overwrites it if
-   present. The content format depends on the backend, because GitHub renders
-   markdown and Jira renders ADF:
+   present.
 
-   - **GitHub** — write the plan as markdown:
+   Record one comment with two parts: the **plan** (intent and decisions, as
+   above), followed by a **`Decisions & Discussions`** section that captures *why*
+   the plan looks the way it does — the key choices and their rationale ("chose X
+   over Y because Z") plus the notable questions planning surfaced and how they
+   resolved. If the planning skill ran a discussion (for example grill-with-docs),
+   distil its questions and answers here. Distil, do not transcribe: the value is
+   the reasoning a later reader needs to understand the feature, not a verbatim
+   log. This section is what makes the recorded plan explain itself once the
+   session is gone.
+
+   The content format depends on the backend, because GitHub renders markdown and
+   Jira renders ADF:
+
+   - **GitHub** — write the plan as markdown, ending with the
+     `## Decisions & Discussions` section:
 
      ```
      printf '%s' "$PLAN_MARKDOWN" > "$(sapa tmp)/plan.md"
@@ -53,7 +67,8 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
      markdown, so a markdown body would show its literal `#`/`-`. Emit a valid
      `{"type":"doc","version":1,"content":[…]}` object using `heading`,
      `paragraph`, `bulletList`/`orderedList` (each `listItem` wrapping a
-     `paragraph`), and `codeBlock` nodes, with `strong`/`em` marks for emphasis:
+     `paragraph`), and `codeBlock` nodes, with `strong`/`em` marks for emphasis.
+     End with a `Decisions & Discussions` heading and its bullets:
 
      ```
      cat > "$(sapa tmp)/plan.adf.json" <<'JSON'
@@ -62,6 +77,10 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
        {"type":"paragraph","content":[{"type":"text","text":"…"}]},
        {"type":"bulletList","content":[
          {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"…"}]}]}
+       ]},
+       {"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Decisions & Discussions"}]},
+       {"type":"bulletList","content":[
+         {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Chose … over … because …"}]}]}
        ]}
      ]}
      JSON
