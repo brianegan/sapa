@@ -11,8 +11,8 @@ session.
 
 Rules (always): the configured remote (default `origin`) is the only remote —
 read it, the base branch, and the PR state from `sapa config -p`; GitHub goes
-through `gh`; never clobber human text (PR body and issue plan go through
-`sapa section`).
+through `gh`, Jira through `acli`. The PR body goes through `sapa section` (never
+clobbering human text); the issue plan goes through `sapa issue plan-comment`.
 
 Before anything else, mark the stream's stage for the window switcher: run `sapa
 status --stage watch` (best-effort — it no-ops outside a sapa stream). Teardown on
@@ -71,13 +71,12 @@ base.
 
     `<your-login>` is the authenticated gh user (`gh api user --jq .login`).
   - Either marker: if it changes the approach, refresh the plan comment on the
-    issue by running `/sapa-plan` step 4's flow in full (find the `sapa:plan`
-    comment, feed its body through `sapa section plan`, patch in place). `sapa
-    section` refuses a damaged read on its own, so there is no guard to hand-roll
-    here. If that comment is locked or edited, leave it. Never touch the issue
-    body. If you reached for the whole `/sapa-plan` skill rather than just its
-    step 4, it will have written `stage: plan`; re-run `sapa status --stage
-    watch` afterward to restore this stage.
+    issue by re-running `/sapa-plan` step 4 — re-author the plan (markdown for
+    GitHub, ADF for Jira) and record it with `sapa issue plan-comment`, which
+    overwrites sapa's own comment in place. Never touch the issue body. If you
+    reached for the whole `/sapa-plan` skill rather than just its step 4, it will
+    have written `stage: plan`; re-run `sapa status --stage watch` afterward to
+    restore this stage.
 - `base-behind` — the base branch moved ahead: either branch protection needs the
   branch up to date (`protection` mode), or `any` mode detected the base is ahead
   on its own. Either way, if the rebase is trivial (no conflicts), invoke

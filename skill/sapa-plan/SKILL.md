@@ -1,28 +1,33 @@
 ---
 name: sapa-plan
-description: Read a stream's GitHub issue, agree a plan, and record it on the issue as a durable comment, then stop. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". For the whole flow (plan, build, gate, submit, watch) use /sapa-flow.
+description: Read a stream's issue (GitHub or Jira), agree a plan, and record it on the issue as a durable comment, then stop. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". For the whole flow (plan, build, gate, submit, watch) use /sapa-flow.
 ---
 
 # sapa-plan
 
-Turn a GitHub issue into an agreed plan, recorded on the issue as a dedicated
+Turn the stream's issue into an agreed plan, recorded on the issue as a dedicated
 comment so it is durable and visible rather than trapped in this session.
 
-Rules (always): the configured remote (default `origin`) is the only remote;
-GitHub goes through `gh`; the plan lives in its own issue comment, never in the
-issue body —
-leave the body byte-for-byte as the author wrote it. The comment is written with
-`sapa section`, which refuses to overwrite a comment a human has edited or
-locked.
+Rules (always): the configured remote (default `origin`) is the only remote. The
+issue lives on GitHub (through `gh`) or Jira (through `acli`); which one is set by
+`tracker:` in the config and is baked into the branch name, so `sapa issue` derives
+it — you never choose by hand. The plan lives in its own issue comment, never in the
+issue body — leave the body byte-for-byte as the author wrote it. The comment is
+recorded with `sapa issue plan-comment`, which finds sapa's own comment by a marker
+and overwrites it; it is not edit-locked, so it always reflects the latest plan.
 
 ## Steps
 
 First, mark the stream's stage for the window switcher: run `sapa status --stage
 plan` (best-effort — it no-ops outside a sapa stream and never needs your input).
 
-1. **Find the issue.** Use the number the user gave, else derive it from the
-   branch name (a leading number like `42-add-widget` → 42), else ask.
-2. **Read it.** `gh issue view <N>`.
+1. **Find the issue.** `sapa issue key` prints the identity for this branch — a
+   GitHub number (`42`) or a Jira key (`GP-1`). Use the value the user gave if they
+   named one, else this.
+2. **Read it.** Read `tracker` from `sapa config -p` (default `github`):
+   - GitHub: `gh issue view <N>`.
+   - Jira: `acli jira workitem view <KEY>` (the plain view renders the description
+     as readable text).
 3. **Plan with the user.** Check the config for a planning skill: run
    `sapa config -p` and look for a `plan:` key. If it names a skill, invoke that
    skill to run the discussion (for example wingspan `/plan` or
@@ -30,58 +35,42 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    approach here. Either way keep the plan about intent and decisions, not
    file-by-file code, and always continue to step 4 — recording it on the issue
    is sapa's durable value no matter who developed the plan.
-4. **Record it as an issue comment.** The plan goes in its own comment carrying
-   the `sapa:plan` markers, never in the issue body.
+4. **Record it as an issue comment.** Write the agreed plan to a file under
+   `$(sapa tmp)` — this stream's own scratch directory, so parallel streams never
+   clobber each other's drafts — then hand it to `sapa issue plan-comment`, which
+   finds sapa's comment (by its marker), creates it if absent, and overwrites it if
+   present. The content format depends on the backend, because GitHub renders
+   markdown and Jira renders ADF:
 
-   Write the agreed plan, then find any existing sapa plan comment. Scratch files
-   go under `$(sapa tmp)`, this stream's own directory, so parallel streams never
-   clobber each other's drafts; the path is stable across commands, so you can
-   reuse `$(sapa tmp)/…` in each. `gh api` returns the id directly and reads
-   bodies in full:
-
-   ```
-   printf '%s' "$PLAN_MARKDOWN" > "$(sapa tmp)/plan.md"
-   gh api /repos/{owner}/{repo}/issues/<N>/comments --paginate \
-     --jq '.[] | select(.body | contains("<!-- sapa:plan")) | .id'
-   ```
-
-   That prints the `id` of the sapa plan comment, or nothing if there is none.
-
-   - **No sapa plan comment yet** — build the comment body from an empty base and
-     post it (stderr status is `created`):
+   - **GitHub** — write the plan as markdown:
 
      ```
-     printf '' | sapa section plan --content-file "$(sapa tmp)/plan.md" > "$(sapa tmp)/comment.md"
-     gh issue comment <N> --body-file "$(sapa tmp)/comment.md"
+     printf '%s' "$PLAN_MARKDOWN" > "$(sapa tmp)/plan.md"
+     sapa issue plan-comment --content-file "$(sapa tmp)/plan.md"
      ```
 
-   - **A sapa plan comment exists** — fetch its current body untruncated, then
-     feed it through `sapa section` so the hash protection applies:
+   - **Jira** — write the plan as an ADF document (JSON). acli renders ADF, not
+     markdown, so a markdown body would show its literal `#`/`-`. Emit a valid
+     `{"type":"doc","version":1,"content":[…]}` object using `heading`,
+     `paragraph`, `bulletList`/`orderedList` (each `listItem` wrapping a
+     `paragraph`), and `codeBlock` nodes, with `strong`/`em` marks for emphasis:
 
      ```
-     gh api /repos/{owner}/{repo}/issues/comments/<id> --jq .body > "$(sapa tmp)/existing.md"
-     sapa section plan --content-file "$(sapa tmp)/plan.md" --body-file "$(sapa tmp)/existing.md" > "$(sapa tmp)/comment.md"
+     cat > "$(sapa tmp)/plan.adf.json" <<'JSON'
+     {"type":"doc","version":1,"content":[
+       {"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Goal"}]},
+       {"type":"paragraph","content":[{"type":"text","text":"…"}]},
+       {"type":"bulletList","content":[
+         {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"…"}]}]}
+       ]}
+     ]}
+     JSON
+     sapa issue plan-comment --content-file "$(sapa tmp)/plan.adf.json"
      ```
 
-     `sapa section` exits non-zero (status 3, nothing on stdout) if that body is
-     damaged — a truncated read that kept an opening marker but lost its close,
-     which patching would turn into a duplicate section. If it errors, stop and
-     report; re-read the body in full rather than patch. Otherwise:
-
-     If `updated`, patch that same comment in place — do not post a new one.
-     `-F body=@file` sends the body from the file, avoiding shell-escaping and
-     argument-length pitfalls:
-
-     ```
-     gh api --method PATCH /repos/{owner}/{repo}/issues/comments/<id> \
-       -F body=@"$(sapa tmp)/comment.md"
-     ```
-
-     If `locked` or `locked-edited`, the user has taken over the comment — leave
-     it unchanged (do not patch) and say so. The plan is still recorded either
-     way; report where it landed and stop.
-
-   Never run `issue edit`; the issue body stays exactly as the author wrote it.
+   The helper prints `created` or `updated` on stderr and injects the identity
+   marker itself, so you do not add one. It never touches the issue body. Report
+   where the plan landed and stop.
 
 Once the plan comment is recorded, this skill is done: the plan is captured and
 durable. Building it is `/sapa-build`, and `/sapa-flow` runs the whole sequence

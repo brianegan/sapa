@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """sapa section — maintain a machine-managed section inside a body of text.
 
-Sapa owns a delimited section of a PR description or a GitHub issue body and
-keeps it current, but it must never clobber text a human has taken over. This
-tool applies that ownership rule deterministically so both the PR description
-and the plan-on-the-issue can reuse the exact same logic.
+Sapa owns a delimited section of a PR description and keeps it current, but it
+must never clobber text a human has taken over. This tool applies that ownership
+rule deterministically. (It once backed the plan-on-the-issue too; that moved to
+`sapa issue` and is no longer edit-locked — see #77 — so this now backs the PR
+description.)
 
 A managed section looks like this:
 

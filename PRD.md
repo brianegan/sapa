@@ -126,11 +126,34 @@ me through my existing notification hook, which opens the right window on click.
 52. As a developer, I want that status to also carry which lifecycle stage each stream is in, so that "watching, idle, waiting on CI" reads differently from "done".
 53. As a developer, I want sapa to only *emit* the status and leave rendering to my own window switcher, so that sapa stays a local producer with no hosted UI or supervisor process.
 54. As a developer, I want the status hooks to be inert in my non-sapa sessions and removable, so that opting into this never pollutes unrelated work or my global config permanently.
+55. As a developer whose team tracks work in Jira, I want to point a repo at Jira with one config key, so that sapa reads the issue from and records the plan to Jira while my PRs stay on GitHub, without changing how any GitHub repo works.
+56. As a developer, I want `sapa start gp-1` to accept a Jira key and keep it in the branch name, so that the branch is self-describing and Jira's dev panel links the branch and PR to the issue for free.
+57. As a developer, I want the plan comment recorded on a Jira issue to render as formatted text, so that it reads as a plan rather than raw markup — accepting that this rides on sapa overwriting its own comment rather than locking it.
+58. As a developer, I want sapa to stop edit-locking the plan comment, so that it always reflects the latest plan; I never hand-edit it, and dropping the lock is what makes the Jira rich-text path simple. My PR description stays edit-locked, since I do edit those.
 
 ## Implementation Decisions
 
 - **Form factor.** A Claude Code skill plus small `git`/`gh` helper scripts.
   Not a binary, not a long-lived daemon, not a proxy remote.
+- **Issue backend (#77).** The issue tracker is selectable per repo with a
+  `tracker:` config key: `github` (default) or `jira`. GitHub stays the zero-config
+  default and is unchanged. On `jira`, sapa reads the issue from and records the
+  plan to Jira through the Atlassian CLI (`acli`) — chosen for the same reason `gh`
+  is: shell out to the tool the developer has already authed, rather than owning
+  auth. PRs always live on GitHub regardless of tracker; the difference is only the
+  issue link (`Closes #N` on GitHub, a `Jira: <browse-url>` line built from
+  `jira.site` on Jira, since a GitHub PR cannot auto-close a Jira issue) and where
+  the plan lands. The backend is never chosen by hand mid-flow: `sapa start` bakes
+  the identity into the branch (a leading number for GitHub, a `gp-1` key for Jira),
+  and a new `sapa issue` helper derives it back and owns the gh-vs-acli branch for
+  reading and recording the plan, so the phase skills stay backend-agnostic and the
+  branch is written and tested once. Two acli quirks shaped the helper, both found
+  against a live instance: `comment update` stores its body as plain text and drops
+  ADF (only `comment create` renders rich), so the plan comment is refreshed by
+  create-new-then-delete-old rather than update-in-place; and `comment list --json`
+  flattens away list items, so the plan is read back through `workitem view --fields
+  comment --json` (full ADF) and re-flattened faithfully. Jira issue transitions and
+  smart-commit closing are out of scope for v1.
 - **GitHub interface.** All GitHub operations go through `gh`. An earlier version
   used `gh-axi` (`npx -y gh-axi`) for its token-efficient TOON output, but that
   output truncates long field values at ~2000 chars in every mode, which corrupts
@@ -148,10 +171,15 @@ me through my existing notification hook, which opens the right window on click.
   Alongside the gate list, optional top-level keys tune the flow with
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
-  `draft`), and `plan:` names a skill `/sapa-plan` delegates the planning
-  discussion to. Config stays agent-interpreted — `sapa config` still just walks
-  up and prints the file; the skills read the keys the way they already read
-  `base`, so no parser is introduced.
+  `draft`), `plan:` names a skill `/sapa-plan` delegates the planning
+  discussion to, and `tracker:` (`github` default, or `jira`) with an optional
+  `jira:` map (`site:` for the PR's issue link, `project:` to expand a bare
+  `sapa start 1` to `GP-1`) selects the issue backend. Config stays
+  agent-interpreted — `sapa config` still just walks up and prints the file; the
+  skills read the keys the way they already read `base`, so no parser is
+  introduced. (The one script that consults config is `sapa start`, which greps
+  the printed config for `tracker`/`project` to expand a bare number — a read,
+  not a parser.)
 - **Changed-file contract for `run:` steps.** The gate rebases onto
   `<remote>/<base>` before it runs, so it already holds the diff against what will
   merge. It hands that to every `run:` step as `SAPA_BASE` and
@@ -294,19 +322,29 @@ me through my existing notification hook, which opens the right window on click.
   with Fable pinned at plan and review — is the designed fallback at roughly 92%
   of solo quality for 63% of the price; if quality headroom is wanted later, the
   cross-model reviewer (user story 27) remains the direction.
-- **Plan capture on the issue.** The agreed plan is written to the GitHub issue,
-  not kept in the local session and not committed to the code repo. It lives in a
-  dedicated, machine-managed "Plan" comment on the issue — never in the issue
-  body, which stays byte-for-byte as the author wrote it — under the same
-  ownership rule as the PR description: the tool maintains that comment until the
-  developer edits it, then it locks. The plan is reconciled at submit (if the
-  build diverged) and when review feedback materially changes the approach, so
-  the issue stays truthful across the life of the work. The PR description links
-  the issue with `Closes #N` and does not repeat the plan. How the plan is
-  *developed* is pluggable: `plan:` can point `/sapa-plan` at another skill
-  (wingspan `/plan`, `/grill-with-docs`) to run the discussion, but the
-  record-to-issue-comment step always runs, since that durable capture — not the
-  dialogue style — is sapa's contribution.
+- **Plan capture on the issue.** The agreed plan is written to the issue (GitHub
+  or Jira, per `tracker`), not kept in the local session and not committed to the
+  code repo. It lives in a dedicated, machine-managed "Plan" comment — never in the
+  issue body, which stays byte-for-byte as the author wrote it. The plan is
+  reconciled at submit (if the build diverged) and when review feedback materially
+  changes the approach, so the issue stays truthful across the life of the work.
+  The PR does not repeat the plan; it links the issue (`Closes #N` on GitHub, a
+  `Jira: <browse-url>` line on Jira). How the plan is *developed* is pluggable:
+  `plan:` can point `/sapa-plan` at another skill (wingspan `/plan`,
+  `/grill-with-docs`) to run the discussion, but the record-to-issue-comment step
+  always runs, since that durable capture — not the dialogue style — is sapa's
+  contribution.
+- **Plan comment is not edit-locked (#77).** Revised from the original design,
+  which locked the plan comment on a human edit under the same ownership rule as
+  the PR description. In practice the plan comment is never hand-edited, so sapa
+  now finds its own comment by an identity marker (an invisible `<!-- sapa:plan -->`
+  on GitHub, a visible sentinel line on Jira) and overwrites it — no content hash,
+  no lock. This is not only a simplification: the hash lock was the one thing that
+  forced a byte-exact round-trip, and dropping it is what lets the Jira comment be
+  authored as rich ADF (which acli stores but reads back only in a flattened form).
+  The `sapa issue plan-comment` helper owns find-create-overwrite and marker
+  injection for both backends. The **PR-description** lock is unaffected and stays
+  in `sapa section`: PR bodies are edited by hand often, plan comments are not.
 - **Window-switcher status (#51).** Sapa emits each stream's status so an external
   window switcher (reference consumer: Jump) can badge every window as running, at
   rest, or waiting — the cross-stream visibility the "concurrency by windows" model
@@ -357,10 +395,14 @@ me through my existing notification hook, which opens the right window on click.
   This rule is the most likely to regress silently, so it earns its own test.
 - **Modules tested.** The deterministic helper scripts behind the `sapa`
   subcommands: `sapa config` (walk-up discovery), `sapa section` (the
-  ownership-lock logic for both PR body and issue plan), `sapa watch` (the poll
+  ownership-lock logic for the PR body), `sapa issue` (branch-to-identity
+  derivation for both backends, and the plan-comment find/create/overwrite plus
+  ADF flatten and marker injection, with `gh` and `acli` both stubbed on PATH),
+  `sapa watch` (the poll
   emitter: the empty/failed-fetch guard, dedup against last-seen state, each event
   type, and terminal-state exit, with `gh` stubbed on PATH), `sapa start`
-  (issue-to-branch-name derivation), `sapa status` (keyed write to the registry,
+  (issue-to-branch-name derivation, including Jira keys and bare-number expansion),
+  `sapa status` (keyed write to the registry,
   state/stage merge without clobber, the self-guard outside a sapa stream, and
   `--clear`), `sapa teardown` (clean-guarded worktree removal), and `sapa
   bootstrap` (the `init` path builds the `.bare` + `main` layout offline), plus the

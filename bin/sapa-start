@@ -1,19 +1,25 @@
 #!/bin/bash
-# sapa start — turn a GitHub issue into a worktree, ready to plan.
+# sapa start — turn a GitHub or Jira issue into a worktree, ready to plan.
 #
-# Replaces the manual dance of creating a branch on GitHub, copying the name,
-# and running `sapa worktree`. Given an issue number, it derives a branch name
-# from the issue title and hands off to `sapa worktree` (which creates the
-# worktree off origin/main and opens your editor).
+# Replaces the manual dance of creating a branch, copying the name, and running
+# `sapa worktree`. Given an issue, it derives a branch name from the issue title
+# and hands off to `sapa worktree` (which creates the worktree off origin/main and
+# opens your editor).
+#
+# The issue is a GitHub number (42) or a Jira key (gp-1). The key is kept in the
+# branch (`gp-1-<slug>`) so it stays self-describing and Jira's dev-panel links the
+# branch by key. A bare number is a GitHub issue by default; when the config sets
+# `tracker: jira` and `jira.project:`, a bare number expands to that project's key
+# (`1` -> `GP-1`).
 #
 # Usage:
-#   sapa start <issue-number> [start-point]
-#   sapa start <issue-number> --title "Some title"   # skip the gh lookup
-#   sapa start <issue-number> --print                # print the branch, don't run sapa worktree
+#   sapa start <issue> [start-point]
+#   sapa start <issue> --title "Some title"   # skip the issue-tracker lookup
+#   sapa start <issue> --print                # print the branch, don't run sapa worktree
 #
-# GitHub access uses `gh`. This script only reads the issue and derives a branch;
-# it never pushes, so the configurable push remote (see `.sapa.yaml` `remote:`)
-# does not apply here.
+# GitHub access uses `gh`, Jira uses `acli`. This script only reads the issue and
+# derives a branch; it never pushes, so the configurable push remote (see
+# `.sapa.yaml` `remote:`) does not apply here.
 
 set -euo pipefail
 
@@ -39,8 +45,26 @@ done
 
 # Normalise: strip a leading '#'.
 issue="${issue#\#}"
-if ! [[ "$issue" =~ ^[0-9]+$ ]]; then
-  echo "sapa start: expected an issue number, got: '${issue:-}'" >&2
+
+# Which backend and which issue key? A Jira key (gp-1) wins on shape; a bare
+# number is GitHub unless the config opts into Jira with a project to expand
+# against. Reading tracker/project is a best-effort grep of the printed config —
+# no YAML parser — mirroring how the skills read their keys; the config may be
+# absent (a manual run outside a stream), so failure just leaves them empty.
+cfg="$("$(dirname "$0")/sapa-config" -p 2>/dev/null || true)"
+tracker="$(printf '%s\n' "$cfg" | sed -n 's/^tracker:[[:space:]]*//p' | head -1)"
+project="$(printf '%s\n' "$cfg" | sed -n 's/^[[:space:]]\{1,\}project:[[:space:]]*//p' | head -1)"
+
+if [[ "$issue" =~ ^[A-Za-z][A-Za-z0-9]*-[0-9]+$ ]]; then
+  key="$issue"
+elif [[ "$issue" =~ ^[0-9]+$ ]]; then
+  if [ "$tracker" = "jira" ] && [ -n "$project" ]; then
+    key="${project}-${issue}"
+  else
+    key="$issue"
+  fi
+else
+  echo "sapa start: expected an issue number (42) or Jira key (gp-1), got: '${issue:-}'" >&2
   exit 2
 fi
 
@@ -53,16 +77,24 @@ slugify() {
 }
 
 # Fetch the title unless it was provided, so tests and offline use can skip the
-# network. Any failure just falls back to a bare-number branch.
+# network. Any failure just falls back to a bare-key branch. A Jira key reads its
+# summary through acli; a GitHub number reads its title through gh.
 if ! $title_set; then
-  title="$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)"
+  if [[ "$key" =~ ^[A-Za-z] ]]; then
+    title="$(acli jira workitem view "$key" --json --fields summary 2>/dev/null \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)["fields"]["summary"])' 2>/dev/null || true)"
+  else
+    title="$(gh issue view "$key" --json title --jq .title 2>/dev/null || true)"
+  fi
 fi
 
+# Keep the key in the branch, lower-cased so it matches the slug convention.
+prefix="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
 slug="$(slugify "${title:-}")"
 if [ -n "$slug" ]; then
-  branch="${issue}-${slug}"
+  branch="${prefix}-${slug}"
 else
-  branch="$issue"
+  branch="$prefix"
 fi
 
 if $print_only; then

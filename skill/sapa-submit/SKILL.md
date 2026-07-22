@@ -1,6 +1,6 @@
 ---
 name: sapa-submit
-description: Push a green stream and open (or update) its PR — a managed body with Closes #N, draft or ready per config — then reconcile the plan on the issue. Use once the gate is green, or when the user says "submit it", "ship it", "open the PR", "sapa submit", or "/sapa-submit".
+description: Push a green stream and open (or update) its PR — a managed body that links its issue, draft or ready per config — then reconcile the plan on the issue. Use once the gate is green, or when the user says "submit it", "ship it", "open the PR", "sapa submit", or "/sapa-submit".
 ---
 
 # sapa-submit
@@ -11,8 +11,9 @@ rebased onto the base — run `/sapa-gate` first, or let `/sapa-flow` do it. Doe
 not gate — that is `/sapa-gate`.
 
 Rules (always): the configured remote (default `origin`) is the only remote;
-GitHub goes through `gh`; never clobber human text (the PR body and issue plan
-are written with `sapa section`).
+GitHub goes through `gh`, Jira through `acli`; the PR always lives on GitHub. The
+PR body is managed with `sapa section` and never clobbers human text; the issue
+plan is recorded with `sapa issue plan-comment` (which is not edit-locked).
 
 Before anything else, mark the stream's stage for the window switcher: run `sapa
 status --stage submit` (best-effort — it no-ops outside a sapa stream).
@@ -24,6 +25,9 @@ Run `sapa config -p` and read these top-level keys (all optional):
 - `base:` — the branch the PR targets (default `main`).
 - `remote:` — the single remote to push to (default `origin`).
 - `pr:` — `draft` or `ready`, the state to open the PR in (default `draft`).
+- `tracker:` — `github` (default) or `jira`, the issue backend the link targets.
+- `jira.site:` — the Jira site host, used only to build the issue link on the
+  Jira path (e.g. `verygood-ventures.atlassian.net`).
 
 ## Step 2 — Ship
 
@@ -72,8 +76,12 @@ Run `sapa config -p` and read these top-level keys (all optional):
    printf '' | sapa section pr-description --content-file "$(sapa tmp)/pr.md" > "$(sapa tmp)/pr-body.md"
    ```
 
-   Append `\n\nCloses #<N>` so the PR links its issue. It sits outside the
-   managed block on purpose, so it survives even after a human locks the body.
+   Append the issue link after the managed block — outside it on purpose, so it
+   survives even after a human locks the body. `sapa issue key` prints the
+   identity. On GitHub append `\n\nCloses #<N>` (it links and auto-closes on
+   merge). On Jira append `\n\nJira: https://<site>/browse/<KEY>` using
+   `jira.site` from the config — Jira has no PR-driven auto-close, and the key in
+   the branch name already back-links the PR on the issue's dev panel.
 4. Open it in the configured state, using the Conventional Commits title
    composed above. When `pr` is `draft` (the default):
 
@@ -104,10 +112,9 @@ Run `sapa config -p` and read these top-level keys (all optional):
 ## Step 3 — Reconcile the plan
 
 If what shipped diverged from the plan on the issue, refresh the plan comment by
-running `/sapa-plan` step 4's flow verbatim — find (or create) the `sapa:plan`
-comment, build it through `sapa section plan`, and post or patch it in place. If
-that comment is `locked`/`locked-edited`, the user owns it — leave it and note
-the divergence in the ship summary. Never touch the issue body.
+re-running `/sapa-plan` step 4 — re-author the plan (markdown for GitHub, ADF for
+Jira) and record it with `sapa issue plan-comment`, which overwrites sapa's own
+comment in place. Never touch the issue body.
 
 ## Step 4 — Summarize
 
@@ -116,7 +123,7 @@ terminal makes it clickable, then one line of key facts:
 
 ```
 <PR URL>
-<title> · <draft|ready> · base <base> · Closes #<N>
+<title> · <draft|ready> · base <base> · <Closes #<N>  (GitHub)  |  Jira <KEY>>
 ```
 
 Carry any plan divergence noted in Step 3 into this summary, then stop.

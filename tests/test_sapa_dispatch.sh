@@ -52,6 +52,10 @@ else
   bad "routes to section (Python helper) (rc=$rc, $out)"
 fi
 
+# --- routing: issue reaches its helper and derives identity offline (--branch) ---
+out="$("$SAPA" issue key --branch gp-1-add-widget)"; rc=$?
+if [ $rc -eq 0 ] && [ "$out" = "GP-1" ]; then ok "routes to issue"; else bad "routes to issue (rc=$rc, $out)"; fi
+
 # --- routing: watch reaches its helper (subhelp is a cheap, network-free probe) ---
 out="$("$SAPA" watch --help 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa watch"; then ok "routes to watch"; else bad "routes to watch (rc=$rc, $out)"; fi
