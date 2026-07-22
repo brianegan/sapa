@@ -267,7 +267,9 @@ def test_ci_failed_is_edge_triggered():
         {"name": "lint", "conclusion": "SUCCESS"},
     ])
     out, _, after = run_once(fixture, prior_state=prior)
-    assert events(out) == [["ci-failed", "unit"]], out
+    # The ci-failed line carries the current fix-attempt count as a trailing
+    # token (0 here, no fixes pushed yet).
+    assert events(out) == [["ci-failed", "unit", "0"]], out
     assert after["ci_failing"] is True, after
     # Held-failing on the next poll does not re-emit.
     out2, _, _ = run_once(fixture, prior_state=after)
@@ -279,7 +281,7 @@ def test_ci_failed_detects_legacy_status_context():
     prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False}
     fixture = pr(checks=[{"context": "ci/legacy", "state": "FAILURE"}])
     out, _, _ = run_once(fixture, prior_state=prior)
-    assert events(out) == [["ci-failed", "ci/legacy"]], out
+    assert events(out) == [["ci-failed", "ci/legacy", "0"]], out
 
 
 @case
@@ -408,6 +410,131 @@ def test_loop_mode_exits_on_terminal_state():
         )
         assert p.returncode == 0, p.stderr
         assert events(p.stdout) == [["merged"]], p.stdout
+
+
+def run_bump(prior_state=None):
+    """Run `sapa-watch --bump-fix-attempt` against a state file.
+
+    Returns (stdout, state_after_dict). No gh calls are made, so no stub is
+    needed — the bump only reads and rewrites the state file.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        state_file = os.path.join(d, "state.json")
+        if prior_state is not None:
+            with open(state_file, "w") as f:
+                json.dump(prior_state, f)
+        p = subprocess.run(
+            [sys.executable, WATCH, "--bump-fix-attempt", "--state-file", state_file],
+            capture_output=True, text=True,
+        )
+        assert p.returncode == 0, p.stderr
+        with open(state_file) as f:
+            after = json.load(f)
+        return p.stdout, after
+
+
+@case
+def test_fix_attempts_persist_across_saves():
+    # A non-zero counter must ride through a poll that changes other state: diff()
+    # rebuilds the state dict from scratch, so an uncarried field would be wiped.
+    prior = {"reviews": [], "comments": [], "ci_failing": True, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 2}
+    # A new comment lands (state changes, so it is saved) while CI stays failing.
+    fixture = pr(checks=[{"name": "unit", "conclusion": "FAILURE"}],
+                 comments=[{"id": "C1", "author": {"login": "bob"}}])
+    _, _, after = run_once(fixture, prior_state=prior)
+    assert after["ci_fix_attempts"] == 2, after
+
+
+@case
+def test_fix_attempts_reset_to_zero_when_ci_recovers():
+    # The failing->passing edge is the reset trigger: CI went green, so the streak
+    # is over and the next failure starts fresh.
+    prior = {"reviews": [], "comments": [], "ci_failing": True, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 3}
+    passing = pr(checks=[{"name": "unit", "conclusion": "SUCCESS"}])
+    _, _, after = run_once(passing, prior_state=prior)
+    assert after["ci_failing"] is False, after
+    assert after["ci_fix_attempts"] == 0, after
+
+
+@case
+def test_fix_attempts_not_reset_during_pending_ci():
+    # The window right after a push: checks are re-running, so nothing is failing
+    # yet — but that is not green. The streak must be carried, not reset, or every
+    # pushed fix would restart the count and defeat the >= N stop.
+    prior = {"reviews": [], "comments": [], "ci_failing": True, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 2}
+    pending = pr(checks=[{"name": "unit", "status": "IN_PROGRESS"}])
+    _, _, after = run_once(pending, prior_state=prior)
+    assert after["ci_failing"] is False, after       # nothing failing right now...
+    assert after["ci_fix_attempts"] == 2, after      # ...but not green, so carried
+
+
+@case
+def test_fix_attempts_not_reset_when_a_check_still_pending():
+    # A mixed rollup (one green, one still running) is not green either: a partial
+    # pass must not clear the streak.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 1}
+    partial = pr(checks=[
+        {"name": "unit", "conclusion": "SUCCESS"},
+        {"name": "lint", "status": "IN_PROGRESS"},
+    ])
+    _, _, after = run_once(partial, prior_state=prior)
+    assert after["ci_fix_attempts"] == 1, after
+
+
+@case
+def test_fix_attempts_not_reset_by_pending_legacy_status():
+    # A legacy status context still PENDING (or EXPECTED, awaiting its report) is
+    # not green: it must not reset the streak, the same as a pending check run.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 2}
+    pending = pr(checks=[{"context": "ci/legacy", "state": "PENDING"}])
+    _, _, after = run_once(pending, prior_state=prior)
+    assert after["ci_fix_attempts"] == 2, after
+
+
+@case
+def test_fix_attempts_reset_on_green_even_after_pending():
+    # Reset must not depend on the immediately-prior poll being failing: a pending
+    # poll flips ci_failing to False first, then the green result lands. The streak
+    # must still clear on that green.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 3}
+    passing = pr(checks=[{"name": "unit", "conclusion": "SUCCESS"}])
+    _, _, after = run_once(passing, prior_state=prior)
+    assert after["ci_fix_attempts"] == 0, after
+
+
+@case
+def test_ci_failed_line_carries_prior_attempt_count():
+    # On a fresh failure edge the emitted count is the streak so far, so the skill
+    # can gate on it (>= N -> stop) without reading the state file.
+    prior = {"reviews": [], "comments": [], "ci_failing": False, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 2}
+    fixture = pr(checks=[{"name": "unit", "conclusion": "FAILURE"}])
+    out, _, after = run_once(fixture, prior_state=prior)
+    assert events(out) == [["ci-failed", "unit", "2"]], out
+    assert after["ci_fix_attempts"] == 2, after
+
+
+@case
+def test_bump_fix_attempt_increments_and_prints():
+    prior = {"reviews": [], "comments": [], "ci_failing": True, "behind": False,
+             "conflicted": False, "ci_fix_attempts": 1}
+    out, after = run_bump(prior_state=prior)
+    assert out.strip() == "2", out
+    assert after["ci_fix_attempts"] == 2, after
+
+
+@case
+def test_bump_fix_attempt_from_absent_state_starts_at_one():
+    # No state file yet (a fresh stream): the first bump lands at 1.
+    out, after = run_bump(prior_state=None)
+    assert out.strip() == "1", out
+    assert after["ci_fix_attempts"] == 1, after
 
 
 def main():

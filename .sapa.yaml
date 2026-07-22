@@ -16,8 +16,12 @@ plan: grill-with-docs
 #   any — also when the base has genuinely moved ahead without that rule
 #     (via the compare API), at the cost of a rebase + re-gate on every
 #     merge to the base.
+# max_ci_fix_attempts (default 3) — how many failed fixes `sapa watch` will push
+#   for a CI failure before it stops and escalates instead of pushing another
+#   guess. The counter resets to 0 whenever CI goes green again.
 # watch:
 #   base_behind: protection
+#   max_ci_fix_attempts: 3
 gate:
   # A step can invoke a skill...
   - name: review

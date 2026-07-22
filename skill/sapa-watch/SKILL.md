@@ -41,8 +41,36 @@ branch-protection rule); `any` also fires it when the base has genuinely moved
 ahead without that rule, at the cost of a rebase and re-gate on every merge to the
 base.
 
-- `ci-failed	<checks>` — CI is failing. Read the failing job (`gh pr checks
-  <N>`), fix the cause in the working tree, commit, and push.
+- `ci-failed	<checks> <attempts>` — CI is failing. `<attempts>` is how many
+  fixes sapa has already pushed for this failure streak (the helper carries it and
+  resets it to 0 the moment CI goes green again). This handler is a bounded,
+  verified loop, not a single-shot patch — an autofix loop with no discipline and
+  no stop patches the symptom, ships a latent bug, and can push guess after guess
+  forever on your account and in public.
+
+  1. **Stop if the attempts are spent.** Read `watch.max_ci_fix_attempts` from
+     `sapa config -p` (default 3 when the key or the `watch:` map is absent) — this
+     is the skill's own gate, not threaded to the helper. If `<attempts>` is `>= N`,
+     do **not** push another guess. Escalate to the developer through the
+     notification hook (the same path the self-comment and base-conflicted cases
+     use) and say plainly that repeated fixes are not converging, which usually
+     means the failure is deeper than the patch, possibly architectural. Then stop:
+     leave the loop for the developer.
+  2. **Find the root cause before editing.** Read the failing job output fully
+     (`gh pr checks <N>`, then the run log). Invoke the harness `diagnosing-bugs`
+     skill to establish *why* it fails and to reproduce the specific failing check
+     locally — do not reimplement a debugging method here, and do not fix a symptom
+     you cannot first reproduce.
+  3. **Verify the fix locally before pushing.** With the failure reproduced, apply
+     the fix, then confirm that same check now passes locally. CI is not the first
+     test of a fix. This is the specific failing check, not a full `/sapa-gate`
+     re-run: the gate already ran at submit and reruns when the base moves.
+  4. **Record the attempt, then push.** Once the fix is green locally, run `sapa
+     watch --bump-fix-attempt` (increments the persisted counter and prints the new
+     value), then commit and push. The next `ci-failed` — if the fix does not hold —
+     arrives carrying the raised count, so the bound is enforced across polls and
+     across a resumed session. A fix that lands green resets the count to 0 on its
+     own.
 - `new-review	<id> <author> <state> <self|other>` /
   `new-comment	<id> <author> <self|other>` — a review or comment landed. The
   trailing marker says who wrote it: `self` is you (the authenticated gh user,
