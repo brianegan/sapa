@@ -325,7 +325,12 @@ me through my existing notification hook, which opens the right window on click.
 - **Plan capture on the issue.** The agreed plan is written to the issue (GitHub
   or Jira, per `tracker`), not kept in the local session and not committed to the
   code repo. It lives in a dedicated, machine-managed "Plan" comment — never in the
-  issue body, which stays byte-for-byte as the author wrote it. The plan is
+  issue body, which stays byte-for-byte as the author wrote it. That one comment
+  carries both the plan and a "Decisions & Discussions" section (#78) distilling
+  why the plan looks the way it does — the choices, their rationale, and the
+  questions planning surfaced (e.g. a grill-with-docs discussion) — so a later
+  reader understands why a feature was built the way it was, not only what it
+  does. The plan is
   reconciled at submit (if the build diverged) and when review feedback materially
   changes the approach, so the issue stays truthful across the life of the work.
   The PR does not repeat the plan; it links the issue (`Closes #N` on GitHub, a
