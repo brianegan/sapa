@@ -15,7 +15,7 @@ failed fetch is guarded and never counts as a change.
 
 Events (one per line, tab-separated; the first token is the type):
 
-    ci-failed    <comma-joined failing check names>
+    ci-failed    <comma-joined failing check names>  <fix-attempts-so-far>
     new-review   <id>  <author>  <state>  <self|other>
     new-comment  <id>  <author>  <self|other>
     base-behind
@@ -43,6 +43,13 @@ holds. `base-behind` fires when the base moved and the branch can rebase cleanly
 than auto-rebases. `merged` / `closed` are terminal: emitted once, then the loop
 stops.
 
+`ci-failed` carries a trailing count: how many fixes have already been pushed for
+the current failure streak. The skill raises it (`--bump-fix-attempt`) before it
+pushes a fix and gates on it — after N failed attempts it stops and escalates
+rather than pushing another guess. The helper only carries the count across polls
+and resets it to 0 once CI is green again (all checks concluded good, not merely
+nothing failing while a re-run is pending), so a fix that lands clears the streak.
+
 `--base-behind` controls how "behind" is detected:
 
     protection (default) — fire base-behind only on `mergeStateStatus: BEHIND`,
@@ -69,6 +76,8 @@ Usage:
     sapa watch --start DIR     # locate the git dir for the state file from DIR (default: $PWD)
     sapa watch --base-behind any  # also treat a genuinely-behind branch as behind
                                   # without an "up to date" protection rule (default: protection)
+    sapa watch --bump-fix-attempt # increment the CI fix-attempt counter, print the
+                                  # new value, exit (the skill calls this before a fix push)
 
 Loop tuning via env (seconds): SAPA_WATCH_INTERVAL (base, default 30),
 SAPA_WATCH_MAX_INTERVAL (cap, default 300), SAPA_WATCH_BACKOFF (factor, default 2).
@@ -91,6 +100,11 @@ import time
 # legacy status contexts carry a `state`. Either of these values means failed.
 FAILING_CONCLUSIONS = {"FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 FAILING_STATES = {"FAILURE", "ERROR"}
+# A concluded-good check: run `conclusion` or legacy status `state`. Anything that
+# is neither passing nor failing (empty conclusion, IN_PROGRESS, PENDING, or a
+# legacy EXPECTED status still awaiting its report) is still running — not green.
+PASSING_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+PASSING_STATES = {"SUCCESS"}
 
 # Only the fields diff() actually reads. `state` doubles as the fetch sanity
 # check: a response without it is not a usable PR view, so fetch_pr skips it.
@@ -122,6 +136,10 @@ def load_state(path: str) -> dict:
         "ci_failing": bool(data.get("ci_failing", False)),
         "behind": bool(data.get("behind", False)),
         "conflicted": bool(data.get("conflicted", False)),
+        # Consecutive fix attempts sapa has pushed for the current failure streak.
+        # The skill bumps it (--bump-fix-attempt) before pushing a fix; the helper
+        # only carries it across saves and resets it to 0 when CI recovers.
+        "ci_fix_attempts": int(data.get("ci_fix_attempts", 0)),
     }
 
 
@@ -169,6 +187,30 @@ def failing_checks(rollup: list | None) -> list:
         if conclusion in FAILING_CONCLUSIONS or state in FAILING_STATES:
             names.append(c.get("name") or c.get("context") or "check")
     return names
+
+
+def ci_green(rollup: list | None) -> bool:
+    """True only when a non-empty rollup has every check concluded successfully.
+
+    Deliberately stricter than `not failing_checks(...)`: that is also true while
+    checks are still pending (no conclusion yet), which is exactly the window
+    right after a fix is pushed and CI is re-running. Resetting the fix-attempt
+    counter on merely-not-failing would zero it every time a fix re-triggers CI,
+    so each pushed guess would restart the streak and the `>= N` stop would never
+    fire. Green means concluded-good, not just quiet.
+    """
+    checks = rollup or []
+    if not checks:
+        return False
+    for c in checks:
+        conclusion = (c.get("conclusion") or "").upper()
+        state = (c.get("state") or "").upper()
+        if conclusion in FAILING_CONCLUSIONS or state in FAILING_STATES:
+            return False
+        if conclusion in PASSING_CONCLUSIONS or state in PASSING_STATES:
+            continue
+        return False  # neither passing nor failing => still running => not green
+    return True
 
 
 def author_of(node: dict) -> str:
@@ -286,9 +328,25 @@ def diff(pr: dict, prior: dict, viewer: str | None, base_behind: str = "protecti
     seen_reviews = set(prior["reviews"])
     seen_comments = set(prior["comments"])
 
+    # The fix-attempt counter is the skill's to raise and the helper's to carry:
+    # reset to 0 once CI is genuinely green (all checks concluded good), otherwise
+    # carry the prior value through untouched. Keyed on `ci_green`, not on a
+    # failing->not-failing edge: the pending window after a push is not-failing but
+    # not green, and a poll landing there must carry the streak, not clear it. This
+    # is also edge-independent — a pending poll flips ci_failing to False before
+    # green arrives, so keying on the prior flag would miss the real recovery. A
+    # bump lands via --bump-fix-attempt between polls, so diff() must never
+    # overwrite the counter with anything but this reset.
+    if ci_green(pr.get("statusCheckRollup")):
+        ci_fix_attempts = 0
+    else:
+        ci_fix_attempts = prior["ci_fix_attempts"]
+
     events = []
     if ci_failing and not prior["ci_failing"]:
-        events.append(("ci-failed", ",".join(failing)))
+        # Carry the current streak count so the skill can gate on it (>= N -> stop
+        # and escalate) without reading the state file itself.
+        events.append(("ci-failed", ",".join(failing), str(ci_fix_attempts)))
     if behind and not prior["behind"]:
         events.append(("base-behind",))
     if conflicted and not prior["conflicted"]:
@@ -308,6 +366,7 @@ def diff(pr: dict, prior: dict, viewer: str | None, base_behind: str = "protecti
         "ci_failing": ci_failing,
         "behind": behind,
         "conflicted": conflicted,
+        "ci_fix_attempts": ci_fix_attempts,
     }
     return events, new_state, False
 
@@ -328,10 +387,15 @@ def poll_once(state_file: str, base_behind: str = "protection") -> tuple:
     if pr is None:
         sys.stderr.write("sapa watch: skipped poll (empty or failed fetch)\n")
         return False, False  # (terminal, changed)
+    baseline_exists = os.path.exists(state_file)
     prior = load_state(state_file)
     events, new_state, terminal = diff(pr, prior, viewer_login(), base_behind)
     emit(events)
-    if not terminal:
+    # Save when the baseline moved, or on the first poll to lay it down. Rewriting
+    # an identical state every poll would widen the window in which a concurrent
+    # --bump-fix-attempt (the skill raising the counter between polls) is clobbered
+    # by a stale save; skipping the no-op write keeps that window to real changes.
+    if not terminal and (not baseline_exists or new_state != prior):
         save_state(state_file, new_state)
     return terminal, bool(events)
 
@@ -358,6 +422,11 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--once", action="store_true", help="single poll, then exit")
+    parser.add_argument(
+        "--bump-fix-attempt", action="store_true",
+        help="increment the persisted CI fix-attempt counter and print the new "
+             "value, then exit (the skill calls this before pushing a fix)",
+    )
     parser.add_argument("--state-file")
     parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
     parser.add_argument(
@@ -368,6 +437,13 @@ def main() -> int:
     args = parser.parse_args()
 
     state_file = args.state_file or default_state_file(args.start)
+
+    if args.bump_fix_attempt:
+        state = load_state(state_file)
+        state["ci_fix_attempts"] += 1
+        save_state(state_file, state)
+        print(state["ci_fix_attempts"])
+        return 0
 
     if args.once:
         poll_once(state_file, args.base_behind)
