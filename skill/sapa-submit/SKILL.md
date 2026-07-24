@@ -28,6 +28,8 @@ Run `sapa config -p` and read these top-level keys (all optional):
 - `tracker:` — `github` (default) or `jira`, the issue backend the link targets.
 - `jira.site:` — the Jira site host, used only to build the issue link on the
   Jira path (e.g. `verygood-ventures.atlassian.net`).
+- `writing_style:` — a skill that shapes the PR body's free prose as a final pass
+  before it is written (default none). Absent, the body is written as composed.
 
 ## Step 2 — Ship
 
@@ -67,10 +69,16 @@ Run `sapa config -p` and read these top-level keys (all optional):
      green at a glance without it crowding the reviewer-facing steps.
 
 3. Build the PR body in a managed section so it is protected from the start.
-   Write the composed `## Summary` / `## Changes` / `## Testing` / `## Gates`
-   markdown to `$(sapa tmp)/pr.md` — this stream's own scratch directory, so
-   parallel streams don't clobber each other, and the path is stable across the
-   commands below — then wrap it:
+   First, if `writing_style:` in the config names a skill, run it over the free
+   prose as a final pass — the `## Summary`, `## Changes`, and `## Testing`
+   sections — leaving the `## Gates` list and the Conventional Commits title
+   untouched, since those are a mechanical record and a structured line, not prose.
+   Invoke the skill the normal way (for example `/humanizer`); if it cannot be
+   model-invoked, read its `SKILL.md` and apply its guidance by hand. Absent the
+   key, keep the composed prose as is. Write the resulting `## Summary` /
+   `## Changes` / `## Testing` / `## Gates` markdown to `$(sapa tmp)/pr.md` — this
+   stream's own scratch directory, so parallel streams don't clobber each other,
+   and the path is stable across the commands below — then wrap it:
 
    ```
    printf '' | sapa section pr-description --content-file "$(sapa tmp)/pr.md" > "$(sapa tmp)/pr-body.md"

@@ -172,7 +172,11 @@ me through my existing notification hook, which opens the right window on click.
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
   `draft`), `plan:` names a skill `/sapa-plan` delegates the planning
-  discussion to, and `tracker:` (`github` default, or `jira`) with an optional
+  discussion to, `writing_style:` names a skill sapa runs as a final pass over
+  the free prose it writes (the plan comment, PR body, and review replies),
+  shaping prose only and leaving the structured parts — task lists and their
+  `Done when:` lines, the PR title, the gate record — as written, and `tracker:`
+  (`github` default, or `jira`) with an optional
   `jira:` map (`site:` for the PR's issue link, `project:` to expand a bare
   `sapa start 1` to `GP-1`) selects the issue backend. Config stays
   agent-interpreted — `sapa config` still just walks up and prints the file; the

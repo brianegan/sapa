@@ -84,6 +84,17 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    list, not a reason to drop the heading. Never pad the list to reach an imagined
    minimum: the work decides the count, one task upward.
 
+   **Style the free prose before recording.** Run `sapa config -p` and look for a
+   `writing_style:` key. If it names a skill, run that skill over the drafted free
+   prose — the intent statement and the `Decisions & Discussions` bullets — as a
+   final pass before you encode and record, so the plan reads in the repo's chosen
+   voice. Leave the `## Tasks` section untouched: its titles are terse by design
+   and its `Done when:` lines are the checkable targets `sapa-build` and spec
+   review cite, so a rewrite must not soften them. If there is no `writing_style:`
+   key, record the prose as drafted. Invoke the skill the normal way (for example
+   `/humanizer`); if it cannot be model-invoked, read its `SKILL.md` and apply its
+   guidance by hand.
+
    The content format depends on the backend, because GitHub renders markdown and
    Jira renders ADF:
 

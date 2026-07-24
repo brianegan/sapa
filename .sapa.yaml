@@ -3,6 +3,9 @@ base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
 plan: grill-with-docs
+# Shape the free prose sapa writes (plan comment, PR body, review replies) with a
+# skill, run as a final pass before recording. Omit to write plainly.
+writing_style: humanizer
 # Issue backend. `github` (default) reads issues and records the plan on GitHub;
 # `jira` uses the Atlassian CLI (acli) and keeps PRs on GitHub. sapa's own repo
 # uses GitHub, so this is left at the default and shown here only as reference:
