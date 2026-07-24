@@ -16,7 +16,7 @@
 #   worktree    spin up a per-branch worktree off origin/main and open it
 #   start       turn a GitHub or Jira issue into a worktree, ready to plan
 #   issue       derive the issue identity and record/read the plan comment
-#   config      locate (or print) the .sapa.yaml for the current stream
+#   config      locate (or print) the .sapa.yaml, or `config init` to create one
 #   tmp         print a per-stream scratch directory for the phase skills
 #   section     maintain a machine-managed section of a PR body
 #   status      record the current stream's status for the window switcher

@@ -1,57 +1,167 @@
 #!/bin/bash
-# sapa config — locate the Sapa config for the current stream.
+# sapa config — locate the Sapa config for the current stream, or create one.
 #
 # Walks up from the current directory until it finds a `.sapa.yaml`, the same
 # way `sapa worktree` walks up to find `.bare`. Prints the path by default, or the
 # contents with -p/--print. Exits non-zero if no config is found.
 #
+# The `init` subcommand writes a starter `.sapa.yaml` into the current directory,
+# with every option commented out so a fresh clone has a documented file to edit
+# instead of a blank page. It works on day one against sapa's built-in defaults.
+#
 # Usage:
-#   sapa config           # print the path to the discovered .sapa.yaml
-#   sapa config -p        # print its contents
-#   sapa config --start DIR   # start the search from DIR instead of $PWD
+#   sapa config              # print the path to the discovered .sapa.yaml
+#   sapa config -p           # print its contents
+#   sapa config --start DIR  # start the search from DIR instead of $PWD
+#   sapa config init         # write a commented .sapa.yaml into $PWD
+#   sapa config init --force # write it even if a config already exists
+#   sapa config init --start DIR  # write into (and search from) DIR
 
 set -euo pipefail
 
 # Ordered by preference: a dotted config wins over a plain one in the same dir.
 names=(".sapa.yaml" "sapa.yaml")
+
+usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
+
+# Walk up from $1, echoing the first config found and returning 0; return 1 if
+# none exists in any parent (or at the filesystem root). Shared by the read path
+# and by `init`'s existing-config check, so both agree on what "a config" means.
+find_config() {
+  local dir="$1" name
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    for name in "${names[@]}"; do
+      if [ -f "$dir/$name" ]; then
+        echo "$dir/$name"
+        return 0
+      fi
+    done
+    dir=$(dirname "$dir")
+  done
+  for name in "${names[@]}"; do
+    if [ -f "/$name" ]; then echo "/$name"; return 0; fi
+  done
+  return 1
+}
+
+# The starter config: every option present but commented, each with a one-line
+# note, so an untouched file runs on sapa's built-in defaults and doubles as the
+# menu of what can be changed. Keep the commented defaults in sync with the real
+# ones in the helpers.
+write_template() {
+  cat > "$1" <<'YAML'
+# Sapa configuration. Every option below is commented out, so this file runs on
+# sapa's built-in defaults as-is. Uncomment a line and change it to override.
+
+# The branch new streams rebase onto and target with their PR. Default: main.
+# base: main
+
+# Whether `sapa submit` opens the PR ready for review or as a draft.
+# One of `ready` or `draft`. Default: draft.
+# pr: draft
+
+# Issue backend. `github` (default) reads issues and records the plan on GitHub.
+# `jira` uses the Atlassian CLI (acli) and keeps PRs on GitHub.
+# tracker: github
+# jira:
+#   site: your-org.atlassian.net   # only used to build the PR's issue link
+#   project: GP                    # lets `sapa start 1` mean GP-1
+
+# A skill to run the planning discussion in `sapa plan` (e.g. grill-with-docs).
+# Omit to discuss the plan inline.
+# plan: grill-with-docs
+
+# A skill to style the free prose sapa writes (plan comment, PR body, review
+# replies), run as a final pass before recording. Omit to write plainly.
+# writing_style: humanizer
+
+# How `sapa watch` keeps a branch mergeable.
+# watch:
+#   # How it decides a branch is behind its base.
+#   #   protection (default): only on mergeStateStatus BEHIND, which needs a
+#   #     "require branches up to date" protection rule.
+#   #   any: also when the base has moved ahead without that rule.
+#   base_behind: protection
+#   # How many failed CI fixes `sapa watch` will push before it stops and
+#   # escalates. Resets to 0 whenever CI goes green again. Default: 3.
+#   max_ci_fix_attempts: 3
+
+# The quality gate `sapa gate` runs. A list of steps, each run in order; a step
+# either invokes a skill or runs a shell command. Replace this example with your
+# project's own checks.
+# gate:
+#   - name: review
+#     skill: code-review
+#   - name: test
+#     run: npm test
+YAML
+}
+
+cmd_init() {
+  local force=false start="${PWD:-$(pwd)}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force) force=true ;;
+      --start) shift; start="$1" ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "sapa config init: unknown argument: $1" >&2; exit 2 ;;
+    esac
+    shift
+  done
+
+  local target="$start/.sapa.yaml"
+
+  # Reuse the read-path walk-up so init agrees with discovery on what a config is.
+  # A hit in $start itself means overwrite; a hit in an ancestor means shadow.
+  # Either way, confirm before writing unless --force is given.
+  local existing
+  if existing="$(find_config "$start")" && ! $force; then
+    if [ -t 0 ]; then
+      local relation="Found an existing config to shadow at"
+      [ "$existing" = "$target" ] && relation="This will overwrite the config at"
+      printf '%s %s\n' "$relation" "$existing" >&2
+      printf 'Create %s anyway? [y/N] ' "$target" >&2
+      local answer
+      read -r answer
+      case "$answer" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "sapa config init: not creating $target" >&2; exit 1 ;;
+      esac
+    else
+      echo "sapa config init: existing config found at $existing;" \
+           "re-run with --force to create $target" >&2
+      exit 1
+    fi
+  fi
+
+  write_template "$target"
+  echo "$target"
+}
+
+# Subcommand dispatch: `init` creates a config; anything else is the read path.
+if [ "${1:-}" = "init" ]; then
+  shift
+  cmd_init "$@"
+  exit 0
+fi
+
+# Read path: locate (or print) the discovered config.
 print_contents=false
 start="${PWD:-$(pwd)}"
-
 while [ $# -gt 0 ]; do
   case "$1" in
     -p|--print) print_contents=true ;;
     --start) shift; start="$1" ;;
-    -h|--help)
-      grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "sapa config: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
-dir="$start"
-while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-  for name in "${names[@]}"; do
-    if [ -f "$dir/$name" ]; then
-      if $print_contents; then
-        cat "$dir/$name"
-      else
-        echo "$dir/$name"
-      fi
-      exit 0
-    fi
-  done
-  dir=$(dirname "$dir")
-done
-
-# Check the filesystem root too.
-for name in "${names[@]}"; do
-  if [ -f "/$name" ]; then
-    if $print_contents; then cat "/$name"; else echo "/$name"; fi
-    exit 0
-  fi
-done
+if path="$(find_config "$start")"; then
+  if $print_contents; then cat "$path"; else echo "$path"; fi
+  exit 0
+fi
 
 echo "sapa config: no .sapa.yaml found in any parent of $start" >&2
 exit 1

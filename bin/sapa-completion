@@ -97,7 +97,17 @@ $pairs
         _arguments '--content-file[plan content to record]:file:_files' '--read[print the current plan comment]' '--branch[override branch detection]:branch: ' '--start[locate the git repo from here]:directory:_files -/'
       fi
       ;;
-    config)     _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/' ;;
+    config)
+      if (( CURRENT == 3 )); then
+        _alternative \
+          'subcommands:subcommand:((init\:"write a commented starter .sapa.yaml"))' \
+          'flags:flag:((-p\:"print the config contents" --print\:"print the config contents" --start\:"search from this directory"))'
+      elif [[ \${words[3]} == init ]]; then
+        _arguments '--force[create even if a config already exists]' '--start[create the config in this directory]:directory:_files -/'
+      else
+        _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/'
+      fi
+      ;;
     tmp)        _arguments '--start[resolve the stream from here]:directory:_files -/' ;;
     section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
     status)     _arguments '--state[run-state]:state:(busy idle needs-you)' '--notification[Notification hook: write needs-you only if genuine]' '--active[PreToolUse hook: clear a stale needs-you on resumed work]' '--stage[lifecycle stage]:stage:(plan build gate submit watch)' '--clear[remove this stream'\''s status file]' '--start[resolve the stream from here]:directory:_files -/' ;;
