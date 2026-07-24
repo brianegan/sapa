@@ -129,7 +129,12 @@ base.
 
     `<your-login>` is the authenticated gh user (`gh api user --jq .login`).
     Lead the body with the fix or the reasoning: no performative agreement, no
-    thanks ("great catch!"). Keep the body technical.
+    thanks ("great catch!"). Keep the body technical. Before posting, if
+    `writing_style:` in the config (`sapa config -p`) names a skill, run it over
+    the reply prose as a final pass — the body under the attribution line, never
+    the attribution line itself. Absent the key, post the reply as written. Invoke
+    the skill the normal way (for example `/humanizer`); if it cannot be
+    model-invoked, read its `SKILL.md` and apply its guidance by hand.
   - Refreshing the plan: when a change you make or sanction alters what the
     recorded plan says — your own `self` decision, an `other` comment you routed
     as a correct, reasonable change, or a judgement call the developer resolved in

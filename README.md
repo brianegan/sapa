@@ -137,6 +137,11 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
+- `writing_style:` — a skill sapa runs as a final pass over the free prose it
+  writes: the plan comment, the PR body, and its replies to review comments (for
+  example `/humanizer`). Omit it (the default) to write plainly. It shapes prose
+  only, never the structured parts — the plan's task list and `Done when:` lines,
+  the PR title, and the gate record stay as written.
 - `tracker:` — the issue backend, `github` (default) or `jira`. On `github`, sapa
   reads issues and records the plan through `gh`, and PRs link the issue with
   `Closes #N`. On `jira`, it reads issues and records the plan through the
@@ -186,6 +191,7 @@ base: main
 remote: origin
 pr: draft
 plan: /grill-with-docs
+writing_style: /humanizer
 gate:
   - name: review
     skill: code-review
