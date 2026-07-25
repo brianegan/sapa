@@ -22,8 +22,9 @@ status --stage gate` (best-effort — it no-ops outside a sapa stream).
 Run `sapa gate --list` to print the resolved gate steps. `sapa gate` finds the
 `.sapa.yaml` itself (walking up the way `sapa worktree` finds `.bare`) and reads
 the keys it needs — `base:` (default `main`), `remote:` (default `origin`), and
-the ordered `gate:` list. `sapa config -p` shows the whole file if you want the
-other keys too.
+the `gate:` map, which holds the ordered `steps:` list and the autofix budget
+`max_fix_attempts:` (default 3, covered in Step 3). `sapa config -p` shows the
+whole file if you want the other keys too.
 
 Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
 
@@ -36,10 +37,14 @@ Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
   `skill:` steps; Step 3 says how to honour it. Absent, the step runs on the
   session model.
 
-Exit 2 means there is nothing to run: no config, no `gate:` key, or a malformed
-step. The message says which. On a missing config, ask whether to use a sensible
+Exit 2 means there is nothing to run: no config, no `gate:` map, no
+`gate.steps:`, a malformed step, or a `max_fix_attempts:` that is not a count.
+The message says which. On a missing config, ask whether to use a sensible
 default gate (test + format) or stop; on a malformed one, report it and stop
-rather than guessing what was meant.
+rather than guessing what was meant. A config whose `gate:` is still the old flat
+list of steps gets an exit 2 naming the edit that fixes it: put the list under a
+`steps:` key. That is a config change for the developer to make, not one to make
+for them silently.
 
 ## Step 2 — Rebase the branch up to date
 
@@ -88,6 +93,7 @@ sapa-gate	plan	<absolute-path>	present|absent
 sapa-gate	step	<name>	run	<exit>	<seconds>
 sapa-gate	step	<name>	skill	pass|fail	-
 sapa-gate	needs-skill	<name>	<skill>	<model-or->
+sapa-gate	attempts	<spent>	<max>
 sapa-gate	done	green
 ```
 
@@ -121,11 +127,44 @@ Act on the exit code:
   restarted the walk from the top rather than write a record understating what ran.
   Its stderr says so. Run the step again and resume as normal.
 - **1 — the last `step` line names the failing step.** Its output is directly
-  above that line. Report it as a finding. Apply a safe, mechanical fix and
-  rerun `sapa gate` from the top; if it is a judgement call, ask. Do not certify
-  green until every step passes. The user may interrupt to change something and
-  rerun `/sapa-gate`.
+  above that line. Report it as a finding. If it is a judgement call, ask, and do
+  not spend an attempt on it. Otherwise apply a safe, mechanical fix and rerun
+  with `sapa gate --fix-attempt`, within the budget below. Do not certify green
+  until every step passes. The user may interrupt to change something and rerun
+  `/sapa-gate`.
 - **2 — nothing to run.** Back to Step 1: the config is missing or malformed.
+- **5 — the autofix budget is spent, so nothing ran.** You reached for another fix
+  after the budget said stop. Do not try again: report where it stands and hand
+  the stream back, as below.
+
+### The autofix budget
+
+"Fix it and run the gate again" with no stop is a loop that grinds. Repeated
+failed fixes usually mean the failure is deeper than the patch, and the gate is
+the worst place to keep guessing, because it is foreground and blocking: every
+pass pays the whole gate, including a pinned `skill:` review step, while the
+developer waits. So the loop is bounded, the way `sapa-watch`'s CI loop is.
+
+Every failed run ends with `sapa-gate	attempts	<spent>	<max>`. `<max>` is
+`gate.max_fix_attempts` (default 3). **When `<spent>` has reached `<max>`, stop
+there.** Do not diagnose, do not edit, do not rerun. Say plainly that repeated
+fixes are not converging on this gate, which usually means the failure is deeper
+than the patch and possibly architectural, and hand the stream back to the
+developer. Say it in chat and stop; the gate is blocking and they are already
+waiting on it, so there is no notification hook to fire.
+
+Below the budget, rerun the whole gate with `sapa gate --fix-attempt`. The flag is
+you saying the rerun checks a fix **you** decided on, and it is what the count
+counts. Passing it when the budget is already spent is refused with exit 5 having
+run nothing, which is the backstop for ignoring the line, not a second chance.
+
+A fix the developer dictated is not one of your guesses, so it reruns **bare**,
+with no `--fix-attempt`. That covers a judgement call they answered and a rebase
+conflict they resolved. A bare rerun starts the count over, which is correct: they
+are in the loop, and a loop blocked on their answer cannot run away. Do not reach
+for a bare rerun to refill your own budget after they said nothing.
+
+A run that reaches green ends the episode. Nothing carries forward.
 
 ### Invoking a `skill:` step
 

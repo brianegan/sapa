@@ -170,7 +170,13 @@ me through my existing notification hook, which opens the right window on click.
   and commands can carry a version-manager prefix (for example `fvm dart
   analyze`, `fvm flutter test`) so they use the project's pinned toolchain rather
   than a global binary on PATH. This extends the `no-mistakes` repo-config idea.
-  Alongside the gate list, optional top-level keys tune the flow with
+  `gate:` is a map holding that list under `steps:`, plus the gate's own settings:
+  `max_fix_attempts:` (default 3) bounds `/sapa-gate`'s autofix loop, the way
+  `watch.max_ci_fix_attempts` bounds the CI one. It was the flat step list until
+  the gate had a setting to carry, and the flat form is now rejected with the edit
+  that fixes it rather than accepted alongside, because two accepted shapes is two
+  shapes to keep working.
+  Alongside the gate map, optional top-level keys tune the flow with
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
   `draft`), `plan:` names a skill `/sapa-plan` delegates the planning

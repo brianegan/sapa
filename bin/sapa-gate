@@ -24,6 +24,7 @@ one):
     sapa-gate  step         <name>  run    <exit>     <seconds>
     sapa-gate  step         <name>  skill  pass|fail  -
     sapa-gate  needs-skill  <name>  <skill>  <model-or-->
+    sapa-gate  attempts     <spent>  <max>
     sapa-gate  done         green
     sapa-gate  list         <name>  <kind>  <command-or-skill>  <model-or-->
 
@@ -50,7 +51,8 @@ a later gate of a narrower scope sit beside the run that had the full one (#99),
 the report reads the last run. Old runs age out past MAX_RUNS.
 
 Each run stamps the head and base SHAs it gated, its scope (always `full` here),
-its result, and which of four states the plan lookup landed in. Each step records
+which fix attempt it is checking, its result, and which of four states the plan
+lookup landed in. Each step records
 its name, kind, command or skill, model, result, duration, and a tail of its output.
 
 A `run:` step's result is an exit code the helper watched. A `skill:` step's is what
@@ -88,18 +90,44 @@ other reason says why on stderr, so the skill can report the difference between
 legitimately runnable before a plan is recorded. A gate with no `skill:` steps
 left makes no plan lookup at all.
 
+The autofix budget
+------------------
+
+"A step failed, so fix it and run the gate again" has no stop in it. Left
+unbounded, a model that keeps almost-fixing one failing step cycles for a long
+time, and every pass pays the whole gate including a pinned review step, in the
+foreground, with the developer waiting on it. `gate.max_fix_attempts:` (default
+3) bounds it, the way `watch.max_ci_fix_attempts` bounds the CI loop for the same
+reason.
+
+An episode is one `/sapa-gate`. A bare invocation opens one at attempt 0. A re-run
+that carries `--fix-attempt` is sapa saying "this checks a fix I decided on myself"
+and takes the next attempt number, which rides on the run entry so it survives
+between the separate processes an episode spans. A green run ends the episode, and
+the count starts over after it.
+
+Only sapa's own guesses spend from the budget. A fix the developer dictated after
+an escalation re-runs bare, because what this bounds is sapa cycling unsupervised,
+and a loop blocked on a human answer cannot run away. The bound binds twice: every
+failed run emits an `attempts` line so the skill can stop before doing the work of
+a fix it will not be allowed to use, and a `--fix-attempt` past the budget is
+refused outright, which is what holds when the skill reads the line and carries on.
+
 Exit codes:
 
     0  every remaining step passed (or `--list`/`--report` printed and exited)
     1  a step failed — a `run:` step's own exit, or a `skill:` step the agent
        resumed with `--result fail`. The walk stops there either way.
-    2  a config or usage error — no config, no `gate:` steps, a malformed step,
-       an unknown `--after` name, `--result` without `--after` or against a `run:`
-       step, or PyYAML missing
+    2  a config or usage error — no config, no `gate:` map, no `gate.steps:`, a
+       malformed step or budget, an unknown `--after` name, `--result` without
+       `--after` or against a `run:` step, `--fix-attempt` with `--after`, or
+       PyYAML missing
     4  stopped at a `skill:` step awaiting dispatch
+    5  the autofix budget is spent, so a `--fix-attempt` ran nothing
 
 Usage:
     sapa gate                  # run the gate from the top
+    sapa gate --fix-attempt    # ...re-checking a fix sapa applied itself
     sapa gate --after NAME     # resume with the step after NAME (a handled skill)
       --result pass|fail       #   what that skill step reported (default pass)
       --summary TEXT           #   one line on what it found
@@ -143,8 +171,15 @@ EXIT_OK = 0
 EXIT_STEP_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_NEEDS_SKILL = 4
+EXIT_ATTEMPTS_SPENT = 5
 
 BIN = os.path.dirname(os.path.realpath(__file__))
+
+# The autofix budget when `gate.max_fix_attempts:` is absent. Mirrors watch's
+# `max_ci_fix_attempts`, and for the same reason: a fix-and-rerun loop with no
+# stop keeps guessing long past the point where the failure is deeper than the
+# patch. Three is enough for a typo and short of a grind.
+DEFAULT_FIX_ATTEMPTS = 3
 
 # The record lives beside the materialized plan in the stream's scratch directory.
 RECORD_NAME = "gate-record.json"
@@ -219,21 +254,60 @@ def load_config(path: str) -> dict:
     return cfg
 
 
-def resolve_steps(cfg: dict, path: str) -> list[dict]:
+def gate_map(cfg: dict, path: str) -> dict:
+    """The `gate:` mapping. Raises ConfigError when the key is missing or not a map.
+
+    `gate:` used to be the step list itself. It became a map so the gate's own
+    settings have somewhere to live beside the steps, and the old shape is rejected
+    with the edit that fixes it rather than accepted alongside: carrying both
+    shapes is how both end up in the wild.
+    """
+    gate = cfg.get("gate")
+    if gate is None:
+        raise ConfigError(f"{path} has no `gate:` key, so there are no steps to run")
+    if isinstance(gate, list):
+        raise ConfigError(
+            f"`gate:` in {path} is a list of steps. It is now a map that holds them "
+            f"under `steps:`, so add a `steps:` line under `gate:` and indent the "
+            f"existing list one level beneath it")
+    if not isinstance(gate, dict):
+        raise ConfigError(f"`gate:` in {path} is not a mapping of gate settings")
+    return gate
+
+
+def fix_budget(gate: dict, path: str) -> int:
+    """The autofix budget from `gate.max_fix_attempts:`, default DEFAULT_FIX_ATTEMPTS.
+
+    `0` is legal and means never autofix: a repo that always wants to be asked.
+    Anything that is not a whole number of attempts is a config error rather than
+    something to round or clamp, because reading `-1` or `three` as the default
+    would hand back a bound the config never asked for, and the whole point of the
+    key is that the developer chose the number.
+    """
+    raw = gate.get("max_fix_attempts")
+    if raw is None:
+        return DEFAULT_FIX_ATTEMPTS
+    # bool is an int subclass, and YAML turns `yes` into one. `max_fix_attempts:
+    # yes` is a mistake, not a budget of 1.
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ConfigError(f"`gate.max_fix_attempts:` in {path} is {raw!r}; it takes a "
+                          f"whole number of attempts, 0 or more")
+    return raw
+
+
+def resolve_steps(gate: dict, path: str) -> list[dict]:
     """The ordered gate steps, normalized. Raises ConfigError on any bad shape.
 
     Names must be unique because `--after` resolves the resume point by name;
     two steps called `test` would make a resume ambiguous.
     """
-    gate = cfg.get("gate")
-    if gate is None:
-        raise ConfigError(f"{path} has no `gate:` key, so there are no steps to run")
-    if not isinstance(gate, list) or not gate:
-        raise ConfigError(f"`gate:` in {path} is not a non-empty list of steps")
+    raw_steps = gate.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise ConfigError(f"`gate.steps:` in {path} is not a non-empty list of steps")
 
     steps = []
     seen = set()
-    for i, raw in enumerate(gate, 1):
+    for i, raw in enumerate(raw_steps, 1):
         where = f"gate step {i} in {path}"
         if not isinstance(raw, dict):
             raise ConfigError(f"{where} is not a mapping")
@@ -383,8 +457,30 @@ def save_record(path: str, record: dict) -> None:
         sys.stderr.write(f"sapa gate: could not write the gate record to {path} ({exc})\n")
 
 
-def new_run(cwd: str, base: str, remote: str) -> dict:
+def attempts_spent(record: dict | None) -> int:
+    """Fix attempts already made in the episode the record's last run belongs to.
+
+    An episode is one `/sapa-gate`: the run that opened it plus every fix sapa
+    applied and re-ran on its own. The count has to survive between them because
+    each re-run is a separate process, so it rides on the run entry.
+
+    A green run ends its episode, so the count starts over after one. Without that,
+    a stream that went green at attempt 2 would carry a spent budget into whatever
+    came next, and the developer would be told to stop after a single fix.
+    """
+    runs = (record or {}).get("runs") or []
+    if not runs or runs[-1].get("result") == "green":
+        return 0
+    spent = runs[-1].get("attempt")
+    return spent if isinstance(spent, int) and spent >= 0 else 0
+
+
+def new_run(cwd: str, base: str, remote: str, attempt: int) -> dict:
     """A fresh run entry, stamped with what it is about to gate.
+
+    `attempt` is which fix in the current episode this run is checking: 0 for the
+    run that opened the episode, 1 for the first fix sapa applied and re-ran, and
+    so on. It is what the budget is counted against.
 
     `scope` is always `full` here. It exists because #99 adds a path that gates only
     the `run:` steps before pushing a CI fix, and the report has to distinguish a
@@ -396,6 +492,7 @@ def new_run(cwd: str, base: str, remote: str) -> dict:
     return {
         "started": now.isoformat().replace("+00:00", "Z"),
         "scope": "full",
+        "attempt": attempt,
         "result": "incomplete",
         "base_ref": f"{remote}/{base}",
         "base_sha": git_sha(f"{remote}/{base}", cwd),
@@ -448,6 +545,23 @@ def skill_entry(step: dict, result: str | None, summary: str | None) -> dict:
         "reported_by": "agent",
         "duration": None,
     }
+
+
+def fail_run(record: dict, path: str, cwd: str, budget: int) -> int:
+    """Close the current run as failed and say where the autofix budget stands.
+
+    The attempts line goes out on every failure, not only the one that exhausts the
+    budget, so the skill can stop before diagnosing and writing a fix it will not be
+    allowed to re-run. The refusal in `gate` is what makes the bound hold when it
+    reads this and carries on anyway.
+
+    The count comes off the run being closed rather than from the caller, because a
+    `--after` resume closes a run it did not open: the attempt is whatever the
+    invocation that started the walk stamped, which only the record knows.
+    """
+    finish_run(record, path, cwd, "failed")
+    emit("attempts", record["runs"][-1].get("attempt", 0), budget)
+    return EXIT_STEP_FAILED
 
 
 def finish_run(record: dict, path: str, cwd: str, result: str) -> None:
@@ -682,10 +796,15 @@ def report(start: str) -> int:
 
 
 def gate(start: str, after: str | None, list_only: bool,
-         result: str | None = None, summary: str | None = None) -> int:
+         result: str | None = None, summary: str | None = None,
+         fix_attempt: bool = False) -> int:
     config_path = find_config(start)
     cfg = load_config(config_path)
-    steps = resolve_steps(cfg, config_path)
+    gate_cfg = gate_map(cfg, config_path)
+    steps = resolve_steps(gate_cfg, config_path)
+    # Validated here rather than where the bound is applied, so `--list` (the
+    # skill's first call) reports a bad budget before any step runs.
+    budget = fix_budget(gate_cfg, config_path)
 
     if list_only:
         for step in steps:
@@ -710,9 +829,33 @@ def gate(start: str, after: str | None, list_only: bool,
             (s["kind"] for s in steps if s["name"] == after), "skill") != "skill":
         raise ConfigError(f"--result and --summary report a `skill:` step's outcome, "
                           f"but {after!r} is a `run:` step the gate ran itself")
+    if fix_attempt and after:
+        raise ConfigError("--fix-attempt marks a re-run of the whole gate after a fix, "
+                          "but --after resumes the walk already in progress, which is "
+                          "not a new attempt")
 
     todo = remaining_steps(steps, after)  # raises on an `--after` naming no step
     record = load_record(rec_path)
+
+    spent = attempts_spent(record)
+    if fix_attempt:
+        if record is None:
+            # Scratch was cleared, or this is a re-run of a gate whose record never
+            # got written. Counting from zero over-credits by whatever was already
+            # spent, but refusing to run would cost the gate itself, and losing
+            # scratch state should cost accuracy rather than the ability to check.
+            sys.stderr.write("sapa gate: no gate record to count fix attempts against; "
+                             "treating this as the first fix of a new attempt\n")
+        if spent >= budget:
+            # The refusal, not just a warning: this is the case the budget exists for,
+            # where the skill has read the attempts line and kept going anyway. Nothing
+            # runs and no run is appended, so the account stays what actually happened.
+            sys.stderr.write(f"sapa gate: {spent} fix attempts already spent on this "
+                             f"gate and `max_fix_attempts` is {budget}; repeated fixes "
+                             f"are not converging, so the failure is likely deeper than "
+                             f"the patch. Hand it back to the developer\n")
+            emit("attempts", spent, budget)
+            return EXIT_ATTEMPTS_SPENT
 
     if after and not resumable(record, steps, after):
         sys.stderr.write(f"sapa gate: no gate record covering the steps before {after!r}; "
@@ -731,7 +874,7 @@ def gate(start: str, after: str | None, list_only: bool,
         # `run:` steps alone before pushing a CI fix, and it needs the run that had
         # the whole gate to still be here afterward.
         record = record or {"runs": []}
-        record["runs"].append(new_run(root, base, remote))
+        record["runs"].append(new_run(root, base, remote, spent + 1 if fix_attempt else 0))
         save_record(rec_path, record)
     else:
         # Record the skill step the agent just handled, before walking on past it.
@@ -742,8 +885,7 @@ def gate(start: str, after: str | None, list_only: bool,
             save_record(rec_path, record)
             emit("step", handled["name"], "skill", entry["result"], "-")
             if entry["result"] == "fail":
-                finish_run(record, rec_path, root, "failed")
-                return EXIT_STEP_FAILED
+                return fail_run(record, rec_path, root, budget)
 
     if any(s["kind"] == "skill" for s in todo):
         path, state = materialize_plan(root, scratch)
@@ -762,8 +904,7 @@ def gate(start: str, after: str | None, list_only: bool,
         record["runs"][-1]["steps"].append(entry)
         save_record(rec_path, record)
         if entry["exit"] != 0:
-            finish_run(record, rec_path, root, "failed")
-            return EXIT_STEP_FAILED
+            return fail_run(record, rec_path, root, budget)
 
     finish_run(record, rec_path, root, "green")
     emit("done", "green")
@@ -784,6 +925,10 @@ def main() -> int:
                              "(default pass, since resuming means it passed)")
     parser.add_argument("--summary", metavar="TEXT",
                         help="with --after: one line on what the skill step found")
+    parser.add_argument("--fix-attempt", action="store_true",
+                        help="this run re-checks a fix sapa applied itself; counts "
+                             "against `gate.max_fix_attempts` and is refused once "
+                             "the budget is spent")
     parser.add_argument("--list", action="store_true", dest="list_only",
                         help="print the resolved steps and exit, running nothing")
     parser.add_argument("--report", action="store_true",
@@ -797,7 +942,7 @@ def main() -> int:
         if args.report:
             return report(os.path.abspath(args.start))
         return gate(os.path.abspath(args.start), args.after, args.list_only,
-                    args.result, args.summary)
+                    args.result, args.summary, args.fix_attempt)
     except ConfigError as exc:
         sys.stderr.write(f"sapa gate: {exc}\n")
         return EXIT_CONFIG

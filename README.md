@@ -53,7 +53,7 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   without clobbering text a human has edited or locked.
 - `sapa status` — record the current stream's run-state and lifecycle stage to a
   per-stream JSON file a window switcher can read (see [Window status](#window-status)).
-- `sapa gate` — walk the configured `gate:` steps in order, run each `run:` step
+- `sapa gate` — walk the configured `gate.steps:` in order, run each `run:` step
   with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
   the `skill:` steps, and emit one structured line per result. It stops when it
   reaches a `skill:` step (exit 4), because invoking a skill needs the agent; the
@@ -75,7 +75,7 @@ Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 Needs `git`, `gh` (authenticated), `python3`, and PyYAML. Everything but PyYAML
 you already have if you use GitHub from a terminal on macOS; PyYAML ships with
 Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Only
-`sapa gate` needs it, to read the `gate:` step list. Jira projects also need
+`sapa gate` needs it, to read the `gate:` map. Jira projects also need
 `acli`.
 
 Clone the repo, then run the installer from it:
@@ -192,7 +192,15 @@ the flow, each with a backward-compatible default:
     max_ci_fix_attempts: 3
   ```
 
-Each gate step under `gate:` is a shell command (`run:`, which may carry a
+`gate:` is a map. Its `steps:` list is the gate itself, and `max_fix_attempts:`
+(default 3) bounds `/sapa-gate`'s autofix loop: after that many fixes applied and
+re-run for one failing gate, it stops and hands the stream back instead of guessing
+again, because repeated failed fixes usually mean the failure is deeper than the
+patch. `0` never autofixes. A run that reaches green ends the count. Unlike watch's
+`max_ci_fix_attempts`, only sapa's own guesses spend from it: a fix you dictated
+after it stopped to ask reruns on a fresh budget.
+
+Each step under `gate.steps:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`). A step may also carry `model:`,
 which pins that step to a model (`fable`, `opus`, `sonnet`, `haiku`) — meaningful
 for `skill:` steps, which then run in a sub-agent pinned to it; absent, the step
@@ -207,17 +215,19 @@ pr: draft
 plan: /grill-with-docs
 writing_style: /humanizer
 gate:
-  - name: review
-    skill: code-review
-    model: fable
-  - name: analyze
-    run: fvm dart analyze
-  - name: test
-    run: fvm flutter test
+  max_fix_attempts: 3
+  steps:
+    - name: review
+      skill: code-review
+      model: fable
+    - name: analyze
+      run: fvm dart analyze
+    - name: test
+      run: fvm flutter test
 ```
 
 The gate is the only thing that checks the work — nothing downstream re-verifies
-it — so make the `gate:` steps count: include a real test, analyze, and review
+it — so make the `gate.steps:` count: include a real test, analyze, and review
 step, not a token check.
 
 ### The gate record
@@ -312,12 +322,13 @@ done <<<"$pkgs"
 
 ```yaml
 gate:
-  - name: format
-    run: ./.sapa-verify.sh format
-  - name: analyze
-    run: ./.sapa-verify.sh analyze
-  - name: test
-    run: ./.sapa-verify.sh test
+  steps:
+    - name: format
+      run: ./.sapa-verify.sh format
+    - name: analyze
+      run: ./.sapa-verify.sh analyze
+    - name: test
+      run: ./.sapa-verify.sh test
 ```
 
 ## Window status
