@@ -14,7 +14,9 @@ merge-base, and a failing step stops the walk instead of letting a later green
 step imply the gate passed.
 """
 
+import json
 import os
+import pty
 import subprocess
 import sys
 import tempfile
@@ -29,6 +31,12 @@ GH_STUB = r'''#!/usr/bin/env python3
 import os, sys
 a = sys.argv[1:]
 plan = os.environ.get("SAPA_TEST_PLAN")
+if os.environ.get("SAPA_TEST_GH_FAILS"):
+    # A `gh` that cannot answer: no auth, no network, not a repo. `sapa issue`
+    # fails with something other than exit 3, which is how the gate tells
+    # "could not check" apart from "no plan is recorded".
+    sys.stderr.write("gh: could not reach GitHub\n")
+    sys.exit(1)
 if a[:1] == ["api"] and a[-2] == "--jq" and a[1].endswith("/comments"):
     if plan:
         print("100")
@@ -98,21 +106,55 @@ class Repo:
         write(os.path.join(shim, "yaml.py"), "raise ImportError('no pyyaml here')\n")
         return os.path.abspath(shim)
 
-    def run(self, *args, plan=None, start=None, pythonpath=None):
+    def env(self, plan=None, gh_fails=False):
         env = dict(os.environ)
         env["PATH"] = self.bindir + os.pathsep + env["PATH"]
         env["SAPA_TMP_DIR"] = self.tmpdir
         env.pop("SAPA_TEST_PLAN", None)
+        env.pop("SAPA_TEST_GH_FAILS", None)
         env.pop("SAPA_BASE", None)
         env.pop("SAPA_CHANGED_FILES", None)
         if plan is not None:
             env["SAPA_TEST_PLAN"] = plan
+        if gh_fails:
+            env["SAPA_TEST_GH_FAILS"] = "1"
+        return env
+
+    def run(self, *args, plan=None, start=None, pythonpath=None, gh_fails=False):
+        env = self.env(plan, gh_fails)
         if pythonpath is not None:
             env["PYTHONPATH"] = pythonpath
         return subprocess.run(
             [sys.executable, GATE, "--start", start or self.dir, *args],
             capture_output=True, text=True, env=env,
         )
+
+    def run_on_a_terminal(self, *args, plan=None):
+        """Run the gate with its stdout and stderr on a pty, and return its output.
+
+        The suite itself runs with pipes, so the interactive branch of `channel`
+        only gets exercised if a test supplies the terminal. Both streams share one
+        pty here because the test only needs the child to see a terminal, not to
+        tell the two apart.
+        """
+        env = self.env(plan)
+        ours, theirs = pty.openpty()
+        proc = subprocess.Popen(
+            [sys.executable, GATE, "--start", self.dir, *args],
+            stdout=theirs, stderr=theirs, env=env,
+        )
+        os.close(theirs)
+        chunks = []
+        while True:
+            try:
+                chunk = os.read(ours, 4096)
+            except OSError:  # EIO once the child drops the last slave fd
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+        os.close(ours)
+        return proc.wait(), b"".join(chunks).decode("utf-8", "replace")
 
     def read(self, rel):
         with open(os.path.join(self.dir, rel)) as f:
@@ -123,6 +165,28 @@ class Repo:
 
     def plan_path(self):
         return os.path.join(self.tmpdir, "repo", "plan.md")
+
+    def record_path(self):
+        return os.path.join(self.tmpdir, "repo", "gate-record.json")
+
+    def record(self):
+        """The parsed gate record, or None when the gate wrote none."""
+        try:
+            with open(self.record_path()) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def runs(self):
+        return (self.record() or {}).get("runs", [])
+
+    def write_record(self, text):
+        os.makedirs(os.path.dirname(self.record_path()), exist_ok=True)
+        write(self.record_path(), text)
+
+    def sha(self, ref="HEAD"):
+        return subprocess.run(["git", "-C", self.dir, "rev-parse", ref],
+                              capture_output=True, text=True).stdout.strip()
 
 
 def lines(stdout):
@@ -280,15 +344,6 @@ def test_a_failing_step_stops_the_walk_and_exits_1():
 
 
 @case
-def test_step_output_streams_through():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo = Repo(tmp, "gate:\n  - name: talk\n    run: echo to-stdout; echo to-stderr >&2\n")
-        p = repo.run()
-        assert "to-stdout" in p.stdout, p.stdout
-        assert "to-stderr" in p.stderr, p.stderr
-
-
-@case
 def test_steps_run_at_the_config_root_not_the_start_dir():
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, "gate:\n  - name: where\n    run: pwd > where.txt\n")
@@ -322,6 +377,10 @@ def test_after_resumes_with_the_following_step():
                          "  - name: first\n    run: echo first > first.txt\n"
                          "  - name: review\n    skill: code-review\n"
                          "  - name: last\n    run: echo last > last.txt\n")
+        # Walk up to the skill step the way the skill does, so the resume has the
+        # record it appends to. Clearing the marker makes a re-run of `first` visible.
+        repo.run(plan="a plan")
+        os.remove(os.path.join(repo.dir, "first.txt"))
         p = repo.run("--after", "review", plan="a plan")
         assert p.returncode == 0, p.stderr
         assert repo.has("last.txt"), "the trailing step did not run"
@@ -344,6 +403,179 @@ def test_unknown_after_name_exits_2():
         p = repo.run("--after", "nope")
         assert p.returncode == 2, p.returncode
         assert "nope" in p.stderr, p.stderr
+
+
+# --- skill-step results, reported on the resume --------------------------------
+
+SKILL_GATE = ("gate:\n"
+              "  - name: review\n    skill: code-review\n    model: fable\n"
+              "  - name: test\n    run: 'true'\n")
+
+
+@case
+def test_a_resume_records_the_skill_step_the_agent_handled():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, SKILL_GATE)
+        repo.run(plan="a plan")
+        p = repo.run("--after", "review", "--result", "pass",
+                     "--summary", "3 findings, none blocking", plan="a plan")
+        assert p.returncode == 0, p.stderr
+        step = repo.runs()[0]["steps"][0]
+        assert step["name"] == "review", step
+        assert step["kind"] == "skill", step
+        assert step["target"] == "code-review", step
+        assert step["model"] == "fable", step
+        assert step["result"] == "pass", step
+        assert step["summary"] == "3 findings, none blocking", step
+        assert step["reported_by"] == "agent", step
+        assert step["duration"] is None, "a duration nothing measured was invented"
+        assert ["step", "review", "skill", "pass", "-"] in lines(p.stdout), p.stdout
+
+
+@case
+def test_a_resume_without_a_result_counts_as_a_reported_pass():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, SKILL_GATE)
+        repo.run(plan="a plan")
+        repo.run("--after", "review", plan="a plan")
+        step = repo.runs()[0]["steps"][0]
+        assert step["result"] == "pass", step
+        assert step["summary"] is None, step
+        assert step["reported_by"] == "agent", step
+
+
+@case
+def test_a_reported_failure_stops_the_walk_and_closes_the_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: review\n    skill: code-review\n"
+                         "  - name: test\n    run: echo ran > ran.txt\n")
+        repo.run(plan="a plan")
+        p = repo.run("--after", "review", "--result", "fail",
+                     "--summary", "a blocking finding", plan="a plan")
+        assert p.returncode == 1, p.returncode
+        assert not repo.has("ran.txt"), "a step after the failed skill step ran"
+        run = repo.runs()[0]
+        assert run["result"] == "failed", run
+        assert run["steps"][0]["result"] == "fail", run["steps"][0]
+
+
+@case
+def test_result_without_after_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, SKILL_GATE)
+        for args in (("--result", "pass"), ("--summary", "x")):
+            p = repo.run(*args)
+            assert p.returncode == 2, f"{args}: {p.returncode}"
+            assert "--after" in p.stderr, p.stderr
+
+
+@case
+def test_reporting_a_result_for_a_run_step_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: test\n    run: 'true'\n"
+                         "  - name: later\n    run: 'true'\n")
+        repo.run()
+        p = repo.run("--after", "test", "--result", "pass")
+        assert p.returncode == 2, p.returncode
+        assert "run:" in p.stderr, p.stderr
+
+
+@case
+def test_a_two_skill_gate_records_both_reported_steps():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: review\n    skill: code-review\n"
+                         "  - name: test\n    run: 'true'\n"
+                         "  - name: docs\n    skill: doc-check\n")
+        repo.run(plan="a plan")
+        repo.run("--after", "review", "--result", "pass", plan="a plan")
+        p = repo.run("--after", "docs", "--result", "pass", plan="a plan")
+        assert p.returncode == 0, p.stderr
+        runs = repo.runs()
+        assert len(runs) == 1, runs
+        assert [s["name"] for s in runs[0]["steps"]] == ["review", "test", "docs"], \
+            runs[0]["steps"]
+        assert runs[0]["result"] == "green", runs[0]
+
+
+# --- a resume with no usable record --------------------------------------------
+
+RESTART_GATE = ("gate:\n"
+                "  - name: first\n    run: echo first >> first.txt\n"
+                "  - name: review\n    skill: code-review\n"
+                "  - name: last\n    run: echo last > last.txt\n")
+
+
+def assert_restarted(repo, p):
+    """The walk went back to the top: it stopped at the skill step again, and the
+    fresh run holds every step from the first one rather than a partial list."""
+    assert p.returncode == 4, f"expected to halt at the skill step again: {p.returncode}"
+    assert ["needs-skill", "review", "code-review", "-"] in lines(p.stdout), p.stdout
+    assert "walking from the first step" in p.stderr, p.stderr
+    assert not repo.has("last.txt"), "the walk carried on past the skill step"
+    run = repo.runs()[-1]
+    assert [s["name"] for s in run["steps"]] == ["first"], run["steps"]
+    assert run["result"] == "incomplete", run
+
+
+@case
+def test_a_resume_with_no_record_walks_from_the_top():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, RESTART_GATE)
+        p = repo.run("--after", "review", plan="a plan")
+        assert_restarted(repo, p)
+
+
+@case
+def test_a_resume_with_an_unparseable_record_walks_from_the_top():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, RESTART_GATE)
+        repo.write_record("{not json at all")
+        p = repo.run("--after", "review", plan="a plan")
+        assert_restarted(repo, p)
+
+
+@case
+def test_a_resume_against_a_finished_run_walks_from_the_top():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, RESTART_GATE)
+        repo.run(plan="a plan")                              # halts at the skill step
+        repo.run("--after", "review", plan="a plan")         # finishes that run
+        os.remove(os.path.join(repo.dir, "last.txt"))        # so a re-run of it shows
+        p = repo.run("--after", "review", plan="a plan")     # nothing left to resume
+        assert_restarted(repo, p)
+        assert len(repo.runs()) == 2, "the restart did not append a fresh run"
+
+
+@case
+def test_a_resume_whose_run_does_not_cover_the_earlier_steps_walks_from_the_top():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, RESTART_GATE)
+        # An incomplete run that never ran `first`: the shape a record from another
+        # config leaves behind. Appending to it would understate what the gate covered.
+        repo.write_record(json.dumps({"runs": [
+            {"started": "2026-01-01T00:00:00Z", "scope": "full", "result": "incomplete",
+             "base_ref": "origin/main", "base_sha": None, "head_sha": None,
+             "spec_source": "not-looked-up", "steps": []},
+        ]}))
+        p = repo.run("--after", "review", plan="a plan")
+        assert_restarted(repo, p)
+
+
+@case
+def test_the_restart_does_not_discard_earlier_runs():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, RESTART_GATE)
+        repo.run(plan="a plan")
+        repo.run("--after", "review", plan="a plan")
+        first_started = repo.runs()[0]["started"]
+        repo.run("--after", "review", plan="a plan")
+        runs = repo.runs()
+        assert len(runs) == 2, runs
+        assert runs[0]["started"] == first_started, "the completed run was overwritten"
+        assert runs[0]["result"] == "green", runs[0]
 
 
 # --- the plan contract ---------------------------------------------------------
@@ -383,6 +615,21 @@ def test_an_absent_plan_does_not_fail_the_gate():
 
 
 @case
+def test_a_plan_that_cannot_be_read_is_recorded_as_unreadable_not_absent():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: review\n    skill: code-review\n")
+        p = repo.run(plan="a plan", gh_fails=True)
+        assert p.returncode == 4, p.returncode  # still halts at the skill, never fails
+        assert repo.runs()[0]["spec_source"] == "unreadable", repo.runs()[0]
+        # The emitted line still collapses to `absent`, which is all the skill needs,
+        # while stderr and the record carry the difference.
+        assert [e for e in lines(p.stdout) if e[0] == "plan"][0][2] == "absent", p.stdout
+        assert "could not read the plan comment" in p.stderr, p.stderr
+        out = repo.run("--report").stdout
+        assert "The recorded plan could not be read" in out, out
+
+
+@case
 def test_a_run_only_gate_does_not_look_up_a_plan():
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
@@ -397,8 +644,375 @@ def test_resuming_past_the_last_skill_step_skips_the_plan_lookup():
         repo = Repo(tmp, "gate:\n"
                          "  - name: review\n    skill: code-review\n"
                          "  - name: test\n    run: 'true'\n")
+        repo.run(plan="a plan")  # the walk that stops at the skill step looks it up
         p = repo.run("--after", "review", plan="a plan")
         assert [e for e in lines(p.stdout) if e[0] == "plan"] == [], p.stdout
+
+
+# --- the output tail -----------------------------------------------------------
+
+@case
+def test_all_output_streams_through_while_only_the_tail_is_recorded():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: chatty\n"
+                         "    run: for i in $(seq 1 500); do echo line-$i; done\n")
+        p = repo.run()
+        assert p.returncode == 0, p.stderr
+        assert p.stdout.count("line-") == 500, p.stdout.count("line-")
+        tail = repo.runs()[0]["steps"][0]["tail"]
+        assert tail.endswith("line-500"), tail[-80:]
+        assert "line-1\n" not in tail, "the tail kept the whole output"
+        assert len(tail.splitlines()) <= 40, len(tail.splitlines())
+
+
+@case
+def test_the_tail_is_capped_by_characters_too():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: wide\n"
+                         "    run: head -c 20000 /dev/zero | tr '\\0' 'x'\n")
+        repo.run()
+        tail = repo.runs()[0]["steps"][0]["tail"]
+        assert len(tail) == 4000, len(tail)
+
+
+@case
+def test_stdout_and_stderr_stay_on_their_own_streams():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: talk\n    run: echo to-stdout; echo to-stderr >&2\n")
+        p = repo.run()
+        assert "to-stdout" in p.stdout, p.stdout
+        assert "to-stderr" not in p.stdout, "stderr was merged into stdout"
+        assert "to-stderr" in p.stderr, p.stderr
+
+
+@case
+def test_both_streams_reach_the_tail():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: talk\n    run: echo to-stdout; echo to-stderr >&2\n")
+        repo.run()
+        tail = repo.runs()[0]["steps"][0]["tail"]
+        assert "to-stdout" in tail and "to-stderr" in tail, tail
+
+
+@case
+def test_a_piped_gate_gives_its_step_no_terminal():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: tty\n"
+                         "    run: if [ -t 1 ]; then echo TTY; else echo NOTTY; fi\n")
+        repo.run()
+        assert repo.runs()[0]["steps"][0]["tail"] == "NOTTY", repo.runs()[0]["steps"][0]
+
+
+@case
+def test_an_interactive_gate_gives_its_step_a_terminal():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: tty\n"
+                         "    run: if [ -t 1 ]; then echo TTY; else echo NOTTY; fi\n")
+        code, out = repo.run_on_a_terminal()
+        assert code == 0, out
+        assert "TTY" in out and "NOTTY" not in out, out
+        assert repo.runs()[0]["steps"][0]["tail"] == "TTY", repo.runs()[0]["steps"][0]
+
+
+@case
+def test_the_recorded_tail_carries_no_escape_sequences():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: colour\n"
+                         "    run: printf '\\033[31mred\\033[0m\\n'\n")
+        code, out = repo.run_on_a_terminal()
+        assert code == 0, out
+        assert "\033[31m" in out, "the colour never reached the terminal"
+        assert repo.runs()[0]["steps"][0]["tail"] == "red", \
+            repr(repo.runs()[0]["steps"][0]["tail"])
+
+
+@case
+def test_the_recorded_tail_is_cleaned_the_same_way_with_or_without_a_terminal():
+    """A pty changes what the step sees. It must not change what the record keeps.
+
+    The step reports whether it got a terminal and then emits colour unconditionally,
+    so the two runs differ only in the line that is supposed to differ, and the
+    escape stripping is observably the same on both paths.
+    """
+    config = ("gate:\n  - name: both\n"
+              "    run: if [ -t 1 ]; then echo TTY; else echo NOTTY; fi;"
+              " printf '\\033[31mred\\033[0m\\n'\n")
+    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+        on_a_pty = Repo(a, config)
+        on_a_pty.run_on_a_terminal()
+        through_a_pipe = Repo(b, config)
+        through_a_pipe.run()
+        pty_tail = on_a_pty.runs()[0]["steps"][0]["tail"]
+        pipe_tail = through_a_pipe.runs()[0]["steps"][0]["tail"]
+        assert pty_tail == "TTY\nred", repr(pty_tail)
+        assert pipe_tail == "NOTTY\nred", repr(pipe_tail)
+        assert "\033" not in pty_tail and "\033" not in pipe_tail, "an escape survived"
+
+
+@case
+def test_a_line_rewritten_in_place_collapses_to_what_the_terminal_shows():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: progress\n"
+                         "    run: printf '10%%\\r50%%\\r100%%\\n'\n")
+        repo.run()
+        assert repo.runs()[0]["steps"][0]["tail"] == "100%", \
+            repr(repo.runs()[0]["steps"][0]["tail"])
+
+
+# --- the record: runs, append semantics, per-run stamps -----------------------
+
+@case
+def test_a_bare_invocation_appends_a_run_rather_than_replacing_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        repo.run()
+        runs = repo.runs()
+        assert len(runs) == 2, runs
+        assert runs[0]["started"] != runs[1]["started"], runs
+        assert all(r["result"] == "green" for r in runs), runs
+
+
+@case
+def test_a_resume_adds_its_steps_to_the_last_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: first\n    run: 'true'\n"
+                         "  - name: review\n    skill: code-review\n"
+                         "  - name: last\n    run: 'true'\n")
+        repo.run(plan="a plan")                        # stops at the skill step
+        repo.run("--after", "review", plan="a plan")   # finishes the walk
+        runs = repo.runs()
+        assert len(runs) == 1, f"the resume started a second run: {runs}"
+        assert [s["name"] for s in runs[0]["steps"]] == ["first", "review", "last"], \
+            runs[0]["steps"]
+        assert runs[0]["result"] == "green", runs[0]
+
+
+@case
+def test_the_record_keeps_at_most_twenty_runs():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        seeded = [{"started": f"2026-01-01T00:00:{i:02d}Z", "scope": "full",
+                   "result": "green", "base_ref": "origin/main", "base_sha": None,
+                   "head_sha": None, "spec_source": "not-looked-up", "steps": [],
+                   "seq": i} for i in range(20)]
+        repo.write_record(json.dumps({"runs": seeded}))
+        repo.run()
+        runs = repo.runs()
+        assert len(runs) == 20, len(runs)
+        assert [r.get("seq") for r in runs[:19]] == list(range(1, 20)), \
+            "the oldest run was not the one dropped"
+        assert "seq" not in runs[-1], "the new run is not last"
+
+
+@case
+def test_a_run_records_the_shas_it_gated():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        run = repo.runs()[0]
+        assert run["head_sha"] == repo.sha("HEAD"), run
+        assert run["base_sha"] == repo.sha("origin/main"), run
+        assert run["base_ref"] == "origin/main", run
+        assert run["scope"] == "full", run
+
+
+@case
+def test_an_unresolvable_base_records_a_null_sha_rather_than_guessing():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "base: nonexistent\ngate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        run = repo.runs()[0]
+        assert run["base_sha"] is None, run
+        assert run["base_ref"] == "origin/nonexistent", run
+
+
+@case
+def test_a_failing_step_closes_the_run_as_failed():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: boom\n    run: exit 7\n"
+                         "  - name: later\n    run: 'true'\n")
+        repo.run()
+        run = repo.runs()[0]
+        assert run["result"] == "failed", run
+        assert [s["name"] for s in run["steps"]] == ["boom"], run["steps"]
+        assert run["steps"][0]["exit"] == 7, run["steps"][0]
+        assert run["steps"][0]["result"] == "fail", run["steps"][0]
+
+
+@case
+def test_a_run_halted_at_a_skill_step_stays_incomplete():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: review\n    skill: code-review\n")
+        repo.run(plan="a plan")
+        run = repo.runs()[0]
+        assert run["result"] == "incomplete", run
+        assert run["spec_source"] == "present", run
+
+
+@case
+def test_the_record_names_which_spec_source_state_applied():
+    states = {
+        "present": ("gate:\n  - name: review\n    skill: code-review\n", "a plan"),
+        "absent": ("gate:\n  - name: review\n    skill: code-review\n", None),
+        "not-looked-up": ("gate:\n  - name: test\n    run: 'true'\n", "a plan"),
+    }
+    for expected, (config, plan) in states.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(tmp, config)
+            repo.run(plan=plan)
+            got = repo.runs()[0]["spec_source"]
+            assert got == expected, f"expected {expected}, got {got}"
+
+
+@case
+def test_a_step_entry_carries_its_command_and_model():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: echo hi\n")
+        repo.run()
+        step = repo.runs()[0]["steps"][0]
+        assert step["target"] == "echo hi", step
+        assert step["kind"] == "run", step
+        assert step["model"] is None, step
+        assert step["duration"] >= 0, step
+
+
+# --- --report: the PR's Gates section -------------------------------------------
+
+@case
+def test_report_with_no_record_says_so_and_exits_0():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        p = repo.run("--report")
+        assert p.returncode == 0, p.stderr
+        assert p.stdout.startswith("## Gates\n"), p.stdout
+        assert "No gate record was found" in p.stdout, p.stdout
+
+
+@case
+def test_report_lists_the_steps_that_ran_by_name():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: review\n    skill: code-review\n    model: fable\n"
+                         "  - name: test\n    run: echo hi\n")
+        repo.run(plan="a plan")
+        repo.run("--after", "review", "--result", "pass", plan="a plan")
+        out = repo.run("--report").stdout
+        assert "- **review**: skill `code-review` on `fable`, passed, agent-reported" in out, out
+        assert "- **test**: command, passed in " in out, out
+        assert "echo hi" not in out, "the report printed the command"
+        assert "Reviewed against the plan recorded on the issue." in out, out
+        assert f"Gated `{repo.sha()[:7]}` against `origin/main@{repo.sha('origin/main')[:7]}`." in out, out
+
+
+@case
+def test_report_marks_a_skill_step_as_agent_reported_and_a_run_step_as_timed():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n"
+                         "  - name: review\n    skill: code-review\n"
+                         "  - name: test\n    run: 'true'\n")
+        repo.run(plan="a plan")
+        repo.run("--after", "review", plan="a plan")
+        out = repo.run("--report").stdout
+        assert "- **review**: skill `code-review`, passed, agent-reported" in out, out
+        assert "agent-reported" not in out.split("- **test**")[1], \
+            "a run step was reported as an agent claim"
+
+
+@case
+def test_report_shows_a_failed_run_and_the_step_that_failed():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: boom\n    run: exit 7\n")
+        repo.run()
+        out = repo.run("--report").stdout
+        assert "- **boom**: command, failed (exit 7) after " in out, out
+        assert "This run did not go green." in out, out
+
+
+@case
+def test_report_says_when_a_run_never_finished():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: review\n    skill: code-review\n")
+        repo.run(plan="a plan")  # halts at the skill step, never resumed
+        out = repo.run("--report").stdout
+        assert "This run never finished, so the list above is partial." in out, out
+
+
+@case
+def test_report_flags_a_head_that_moved_since_the_gate_ran():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        gated = repo.sha()
+        write(os.path.join(repo.dir, "more.txt"), "more\n")
+        git(repo.dir, "add", ".")
+        git(repo.dir, "commit", "-qm", "one more")
+        out = repo.run("--report").stdout
+        assert f"The gate ran on `{gated[:7]}`, which is not the current head " \
+               f"`{repo.sha()[:7]}`." in out, out
+
+
+@case
+def test_report_says_nothing_about_a_moved_head_when_it_has_not_moved():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        assert "not the current head" not in repo.run("--report").stdout
+
+
+@case
+def test_report_states_each_spec_source_case():
+    expected = {
+        "present": "Reviewed against the plan recorded on the issue.",
+        "absent": "No plan is recorded on the issue, so no step was given one as a "
+                  "spec source.",
+        "unreadable": "The recorded plan could not be read, so no step was given one "
+                      "as a spec source.",
+        "not-looked-up": "No step was given the recorded plan as a spec source.",
+    }
+    for state, line in expected.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(tmp, "gate:\n  - name: test\n    run: 'true'\n")
+            repo.run()
+            record = repo.record()
+            record["runs"][-1]["spec_source"] = state
+            repo.write_record(json.dumps(record))
+            out = repo.run("--report").stdout
+            assert line in out, f"{state}: {out}"
+        # The thin-gate case is the one worth reading at a glance.
+        if state == "not-looked-up":
+            assert "Reviewed against" not in out, out
+
+
+@case
+def test_report_names_an_unresolved_base_rather_than_inventing_one():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "base: nonexistent\ngate:\n  - name: test\n    run: 'true'\n")
+        repo.run()
+        out = repo.run("--report").stdout
+        assert "against `origin/nonexistent` (unresolved)." in out, out
+
+
+@case
+def test_report_reads_the_most_recent_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: first\n    run: exit 3\n")
+        repo.run()
+        write(os.path.join(repo.dir, ".sapa.yaml"), "gate:\n  - name: second\n    run: 'true'\n")
+        repo.run()
+        out = repo.run("--report").stdout
+        assert "- **second**: command, passed" in out, out
+        assert "first" not in out, "the report described a superseded run"
+
+
+@case
+def test_report_runs_no_steps():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, "gate:\n  - name: touch\n    run: echo ran > ran.txt\n")
+        repo.run("--report")
+        assert not repo.has("ran.txt"), "--report executed a step"
 
 
 def main():

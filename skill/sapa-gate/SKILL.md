@@ -86,18 +86,40 @@ own output can't be mistaken for one:
 ```
 sapa-gate	plan	<absolute-path>	present|absent
 sapa-gate	step	<name>	run	<exit>	<seconds>
+sapa-gate	step	<name>	skill	pass|fail	-
 sapa-gate	needs-skill	<name>	<skill>	<model-or->
 sapa-gate	done	green
 ```
+
+As it walks, `sapa gate` writes a record of what ran to the stream's scratch
+directory — per step the name, kind, command or skill, model, result, duration,
+and a tail of its output, plus the SHAs the run gated and whether any step was
+given the plan as a spec source. `/sapa-submit` publishes a summary of it to the
+PR through `sapa gate --report`, so what you report in chat and what a reviewer
+sees come from the same place. Nothing here has to maintain the record by hand;
+the one thing it needs from you is the outcome of each `skill:` step, below.
 
 Act on the exit code:
 
 - **0 — `done green`.** Every step passed. Report the branch is green and stop;
   `/sapa-submit` ships it next.
 - **4 — `needs-skill`.** The walk has reached a `skill:` step, which needs this
-  harness. Invoke it (below), and when it passes continue the walk with `sapa
-  gate --after <name>`. Repeat until the gate ends on 0 or 1. A skill step whose
-  findings are a genuine failure is treated like a failed step: stop and report.
+  harness. Invoke it (below), and when it passes continue the walk with `sapa gate
+  --after <name> --result pass --summary "<one line on what it found>"`. Repeat
+  until the gate ends on 0 or 1. A skill step whose findings are a genuine failure
+  is treated like a failed step: resume with `--result fail` and a summary saying
+  why, which records the failure and stops the walk, then report it.
+
+  Report the result honestly. The helper cannot watch a skill step the way it
+  watches an exit code, so what you pass here is the only account of that step
+  there will ever be, and it goes on the PR labelled as your word rather than as
+  something sapa observed. Omitting `--result` counts as a pass, so resuming after
+  a step you have not actually judged silently certifies it.
+
+  **Getting `needs-skill` for a step you already handled is not a loop.** It means
+  the record was lost (a cleared `TMPDIR`, a resume run by hand) and the helper
+  restarted the walk from the top rather than write a record understating what ran.
+  Its stderr says so. Run the step again and resume as normal.
 - **1 — the last `step` line names the failing step.** Its output is directly
   above that line. Report it as a finding. Apply a safe, mechanical fix and
   rerun `sapa gate` from the top; if it is a judgement call, ask. Do not certify
@@ -125,6 +147,11 @@ its spec axis honestly rather than degrading to "no spec available" silently, an
 warn visibly in the gate report that spec-compliance did not run. A green gate
 must never imply the spec was checked when it was not. It is never a reason to
 fail the step.
+
+That warning also outlives the session now: the helper records which of the two
+cases applied, and `sapa gate --report` puts it on the PR. Say it in chat anyway —
+the developer is deciding what to do next and should not have to open the PR to
+find out the spec axis had nothing to check.
 
 When the `needs-skill` line carries a model (anything but `-`), run that step
 inside a single sub-agent pinned to that model via the Agent tool's model

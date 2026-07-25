@@ -130,6 +130,8 @@ me through my existing notification hook, which opens the right window on click.
 56. As a developer, I want `sapa start gp-1` to accept a Jira key and keep it in the branch name, so that the branch is self-describing and Jira's dev panel links the branch and PR to the issue for free.
 57. As a developer, I want the plan comment recorded on a Jira issue to render as formatted text, so that it reads as a plan rather than raw markup — accepting that this rides on sapa overwriting its own comment rather than locking it.
 58. As a developer, I want sapa to stop edit-locking the plan comment, so that it always reflects the latest plan; I never hand-edit it, and dropping the lock is what makes the Jira rich-text path simple. My PR description stays edit-locked, since I do edit those.
+59. As a developer, I want the gate to write down what it actually ran, so that "the branch is green" is something I can check against a record rather than a claim that disappears with the session.
+60. As a reviewer, I want the PR to show which gate steps ran and whether any of them was given the plan to review against, so that I can see a thin gate for what it is without digging through someone else's config.
 
 ## Implementation Decisions
 
@@ -201,6 +203,31 @@ me through my existing notification hook, which opens the right window on click.
   executed by one tested helper rather than reproduced from prose per session.
   Structured per-package step results are a later refinement, built once
   changed-package scoping proves out.
+- **The gate record, and disclosure over enforcement.** A green gate was an
+  assertion the model made in chat, and it died with the session, so two things
+  were invisible: a step that did not really pass, and a gate that never had a bar.
+  `sapa gate` now writes a record as it walks — per step the name, kind, command or
+  skill, model, result, duration, and an output tail, and per run the head and base
+  SHAs and which of four states the plan lookup landed in — and `sapa gate --report`
+  renders it as the PR's `## Gates` section. A PR gated by `format` alone reads as
+  visibly thin and a PR where no step saw the plan says so, but sapa never refuses
+  to certify a weak gate and never scores one: enforcing a minimum would make
+  adoption on someone else's repo a fight and is not sapa's call, while putting the
+  truth on the PR moves the pressure to the reviewer and costs a good gate nothing.
+  Three things follow from that being evidence rather than prose. The helper renders
+  the section, not the model, since a paraphrase of the record is the same assertion
+  the record replaced. A `skill:` step's result is carried back by the agent on the
+  resume call and printed as `agent-reported`, because the helper cannot observe a
+  skill step the way it observes an exit code and collapsing the two would relaunder
+  the claim. And the spec-source line states what sapa observed rather than
+  concluding the spec went unchecked, since sapa cannot know whether a given step is
+  a spec review. The record is `{"runs": [...]}` and appends rather than overwrites,
+  aging out the oldest runs past a cap: a bare invocation appends a run, `--after`
+  extends the last one, and a resume with no usable record walks from the top rather
+  than write a partial account. That shape
+  is deliberately #99's — it gates only the `run:` steps before pushing a CI fix and
+  needs the full-gate run still present beside it — as are the per-run SHAs, the
+  `scope` field, and the split between record-level and run-level rendering.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
   single invocation carries a stream from its issue through plan, build, gate,
   PR, and watch by invoking each phase skill in turn, with no second command. It
@@ -245,10 +272,12 @@ me through my existing notification hook, which opens the right window on click.
   changed and why), `## Changes` (notable changes, omitted for trivial ones),
   `## Testing` (how a reviewer can best test the change themselves, scaled to the
   change — green lights for a mechanical one, navigation steps for a
-  human-perceived one), and `## Gates` (the automated record — the gate steps and
-  tests sapa ran — kept out of `## Testing` so the reviewer-facing steps stay
-  uncluttered). `Closes #N` sits outside the managed section
-  so it survives after a human locks the body.
+  human-perceived one), and `## Gates` (the automated record — kept out of
+  `## Testing` so the reviewer-facing steps stay uncluttered). `## Gates` is not
+  composed by the model: `sapa gate --report` renders it from the gate record and
+  `sapa-submit` appends it verbatim, after the `writing_style:` pass and never
+  through it. `Closes #N` sits outside the managed section so it survives after a
+  human locks the body.
 - **Watcher wake model.** The background poller checks CI and comments on an
   interval with back-off and only wakes the session when state changes. The
   polling itself is the committed `sapa watch` helper: it resolves the PR for the

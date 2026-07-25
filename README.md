@@ -57,7 +57,10 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
   the `skill:` steps, and emit one structured line per result. It stops when it
   reaches a `skill:` step (exit 4), because invoking a skill needs the agent; the
-  `sapa-gate` skill invokes it and resumes with `sapa gate --after <name>`.
+  `sapa-gate` skill invokes it and resumes with `sapa gate --after <name>`,
+  reporting that step's outcome with `--result`/`--summary`. The walk writes a
+  record of itself, and `sapa gate --report` renders that record as the PR's
+  `## Gates` section (see [The gate record](#the-gate-record)).
 - `sapa watch` — poll the current branch's PR and emit one structured line per
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`), guarding empty or failed fetches and deduping against the
@@ -216,6 +219,48 @@ gate:
 The gate is the only thing that checks the work — nothing downstream re-verifies
 it — so make the `gate:` steps count: include a real test, analyze, and review
 step, not a token check.
+
+### The gate record
+
+That last paragraph used to be the whole enforcement mechanism: advice in a README,
+against a "the branch is green" that was a sentence in a chat log and gone with the
+session. So the gate writes down what it did, and the PR publishes it.
+
+As `sapa gate` walks, it appends to `$(sapa tmp)/gate-record.json` — per step the
+name, kind, command or skill, model pin, result, duration, and a tail of its output,
+and per run the head and base SHAs it gated plus whether any step was given the
+recorded plan as its spec source. `sapa-submit` then puts a summary on the PR:
+
+```
+## Gates
+
+Gated `def5678` against `origin/main@abc1234`.
+
+- **review**: skill `code-review` on `fable`, passed, agent-reported
+- **test**: command, passed in 42.3s
+
+Reviewed against the plan recorded on the issue.
+```
+
+A gate of one `format` step renders as one bullet and reads as thin, and a PR where
+nothing was given the plan says so. That is deliberate, and it is the whole design:
+disclosure, not enforcement. Sapa will not refuse to certify a weak gate — that
+would make adopting it on someone else's repo a fight, and it is not sapa's call —
+so it puts the truth where the reviewer is and lets them judge. A good gate pays
+nothing for this.
+
+Two things the section is careful about. A `run:` step's result is an exit code sapa
+watched, while a `skill:` step's is what the agent reported when it resumed the
+walk, and skill bullets say `agent-reported` rather than letting the two read as the
+same kind of evidence. And the spec-source line states what sapa observed rather
+than reaching a verdict, because sapa cannot know whether a given step is a spec
+review. Names only, no commands: the config is checked in and shows up in the diff.
+
+The record lives in the stream's scratch directory and does not survive a reboot.
+Submitting without a fresh gate is legitimate, so `sapa gate --report` says no
+record was found rather than rebuilding a plausible list from the config. It also
+compares the recorded head against the current one and flags a gate that ran on a
+different commit. Run it yourself any time: `sapa gate --report`.
 
 ### Changed-package scoping in a monorepo
 

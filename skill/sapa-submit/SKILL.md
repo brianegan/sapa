@@ -60,29 +60,43 @@ Run `sapa config -p` and read these top-level keys (all optional):
      exercised with capability the reviewer has on their machine (integration
      tests behind their own keys), point them at running those. This is not a
      recap of the gate sapa already ran — that record is `## Gates`.
-   - `## Gates` — a bulleted list of the checks sapa ran on the branch, one
-     bullet per gate step (by name, from the config, e.g. review + test). Where a
-     step covers several things — a test step running many suites — break those
-     onto sub-bullets rather than cramming them into an inline parenthetical, so
-     the record stays scannable. This is the automated record — the recap that
-     `## Testing` deliberately leaves out — so a reviewer can see what is already
-     green at a glance without it crowding the reviewer-facing steps.
+   - `## Gates` — the automated record, the recap `## Testing` deliberately leaves
+     out. You do not write this section: `sapa gate --report` prints it from the
+     record the gate wrote, and Step 3 appends it verbatim. Do not compose it, do
+     not summarize it, and do not reconcile it against the config if the two seem
+     to disagree — the config says what the gate would run and the record says what
+     it did, and where they differ the record is the one worth publishing. If it
+     reports no record, or a head that has moved, leave that in and say so in the
+     ship summary.
 
 3. Build the PR body in a managed section so it is protected from the start.
    First, if `writing_style:` in the config names a skill, run it over the free
    prose as a final pass — the `## Summary`, `## Changes`, and `## Testing`
-   sections — leaving the `## Gates` list and the Conventional Commits title
-   untouched, since those are a mechanical record and a structured line, not prose.
-   Invoke the skill the normal way (for example `/humanizer`); if it cannot be
-   model-invoked, read its `SKILL.md` and apply its guidance by hand. Absent the
-   key, keep the composed prose as is. Write the resulting `## Summary` /
-   `## Changes` / `## Testing` / `## Gates` markdown to `$(sapa tmp)/pr.md` — this
-   stream's own scratch directory, so parallel streams don't clobber each other,
-   and the path is stable across the commands below — then wrap it:
+   sections — leaving the Conventional Commits title untouched, since it is a
+   structured line rather than prose. Invoke the skill the normal way (for example
+   `/humanizer`); if it cannot be model-invoked, read its `SKILL.md` and apply its
+   guidance by hand. Absent the key, keep the composed prose as is.
+
+   Write the resulting `## Summary` / `## Changes` / `## Testing` markdown to
+   `$(sapa tmp)/pr.md` — this stream's own scratch directory, so parallel streams
+   don't clobber each other, and the path is stable across the commands below — then
+   append the gate record's own account of what ran and wrap the result:
 
    ```
+   { printf '\n'; sapa gate --report; } >> "$(sapa tmp)/pr.md"
    printf '' | sapa section pr-description --content-file "$(sapa tmp)/pr.md" > "$(sapa tmp)/pr-body.md"
    ```
+
+   The blank line is load-bearing: markdown needs one before a heading, and without
+   it `## Gates` renders as the tail of your last `## Testing` sentence.
+
+   `sapa gate --report` renders `## Gates` from the record `sapa gate` wrote while
+   it walked: the steps that actually ran, their results, the commit it gated, and
+   whether any step was given the recorded plan as its spec source. It always
+   succeeds and always prints a section, so the append needs no guard. Run it after
+   the `writing_style:` pass and never through it — the section is a mechanical
+   record, and a rewrite would turn evidence back into an assertion, which is the
+   whole reason it is not composed here.
 
    Append the issue link after the managed block — outside it on purpose, so it
    survives even after a human locks the body. `sapa issue key` prints the
@@ -134,5 +148,9 @@ terminal makes it clickable, then one line of key facts:
 <title> · <draft|ready> · base <base> · <Closes #<N>  (GitHub)  |  Jira <KEY>>
 ```
 
-Carry any plan divergence noted in Step 3 into this summary, then stop.
+Carry any plan divergence noted in Step 3 into this summary. Carry the gate record
+too when it is not clean: if `sapa gate --report` found no record, or reported a
+gated commit that is not the current head, say so here in one line. The PR already
+says it, and the developer should not have to read their own PR body to find out
+the branch went up on the strength of a gate that did not run on it. Then stop.
 `/sapa-watch` monitors the PR from here.
