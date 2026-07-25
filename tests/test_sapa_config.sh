@@ -97,9 +97,15 @@ for key in base pr tracker plan writing_style watch gate; do
   check "init documents $key" "yes" "$present"
 done
 
-# Task 2: the gate example shows two steps.
-steps=$(grep -cE "^#   - name:" "$fresh/.sapa.yaml")
+# Task 2: the gate example shows two steps, nested under `gate.steps:`.
+steps=$(grep -cE "^#     - name:" "$fresh/.sapa.yaml")
 check "init gate example has two steps" "2" "$steps"
+nested=no
+grep -qE "^#   steps:" "$fresh/.sapa.yaml" && nested=yes
+check "init gate example nests them under steps:" "yes" "$nested"
+budget=no
+grep -qE "^#   max_fix_attempts:" "$fresh/.sapa.yaml" && budget=yes
+check "init documents max_fix_attempts" "yes" "$budget"
 
 # Task 3: a non-interactive run refuses when a config exists (proj/ has one).
 guarded="$root/proj/feature/init-here"

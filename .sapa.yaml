@@ -2,7 +2,7 @@
 base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
-plan: grill-with-docs
+plan: grilling
 # Shape the free prose sapa writes (plan comment, PR body, review replies) with a
 # skill, run as a final pass before recording. Omit to write plainly.
 writing_style: humanizer
@@ -26,12 +26,17 @@ writing_style: humanizer
 #   base_behind: protection
 #   max_ci_fix_attempts: 3
 gate:
-  # A step can invoke a skill...
-  - name: review
-    skill: code-review
-    # Pin review to the strongest model; sessions can run cheaper (see PRD).
-    model: fable
-  # ...or run a shell command (prefix with a version manager if needed). The
-  # runner is the only list of test files, so the gate and CI run the same suite.
-  - name: test
-    run: bash tests/run.sh
+  # How many fixes `/sapa-gate` will apply and re-run for one failing gate before
+  # it stops and hands the stream back instead of guessing again (default 3).
+  # 0 means never autofix. Left at the default here, shown only as reference:
+  #   max_fix_attempts: 3
+  steps:
+    # A step can invoke a skill...
+    - name: review
+      skill: code-review
+      # Pin review to the strongest model; sessions can run cheaper (see PRD).
+      model: fable
+    # ...or run a shell command (prefix with a version manager if needed). The
+    # runner is the only list of test files, so the gate and CI run the same suite.
+    - name: test
+      run: bash tests/run.sh

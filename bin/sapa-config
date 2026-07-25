@@ -86,14 +86,18 @@ write_template() {
 #   # escalates. Resets to 0 whenever CI goes green again. Default: 3.
 #   max_ci_fix_attempts: 3
 
-# The quality gate `sapa gate` runs. A list of steps, each run in order; a step
+# The quality gate `sapa gate` runs. `steps:` is a list run in order; a step
 # either invokes a skill or runs a shell command. Replace this example with your
 # project's own checks.
 # gate:
-#   - name: review
-#     skill: code-review
-#   - name: test
-#     run: npm test
+#   # How many fixes `/sapa-gate` applies and re-runs for one failing gate before
+#   # it stops and hands the stream back. 0 never autofixes. Default: 3.
+#   max_fix_attempts: 3
+#   steps:
+#     - name: review
+#       skill: code-review
+#     - name: test
+#       run: npm test
 YAML
 }
 

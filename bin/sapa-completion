@@ -111,7 +111,7 @@ $pairs
     tmp)        _arguments '--start[resolve the stream from here]:directory:_files -/' ;;
     section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
     status)     _arguments '--state[run-state]:state:(busy idle needs-you)' '--notification[Notification hook: write needs-you only if genuine]' '--active[PreToolUse hook: clear a stale needs-you on resumed work]' '--stage[lifecycle stage]:stage:(plan build gate submit watch)' '--clear[remove this stream'\''s status file]' '--start[resolve the stream from here]:directory:_files -/' ;;
-    gate)       _arguments '--after[resume with the step after this one]:step name: ' '--result[the outcome the skill step reported]:result:(pass fail)' '--summary[one line on what the skill step found]:text: ' '--list[print the resolved steps, run nothing]' '--report[print the Gates section for the recorded run]' '--start[discover the config from here]:directory:_files -/' ;;
+    gate)       _arguments '--after[resume with the step after this one]:step name: ' '--result[the outcome the skill step reported]:result:(pass fail)' '--summary[one line on what the skill step found]:text: ' '--fix-attempt[this run re-checks a fix sapa applied itself]' '--list[print the resolved steps, run nothing]' '--report[print the Gates section for the recorded run]' '--start[discover the config from here]:directory:_files -/' ;;
     watch)      _arguments '--once[single poll, then exit]' '--state-file[last-seen state file]:file:_files' '--start[locate the git dir from here]:directory:_files -/' ;;
     teardown)
       # Priority: a blank word completes directories (the common case, picking a
