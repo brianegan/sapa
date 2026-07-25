@@ -178,12 +178,16 @@ me through my existing notification hook, which opens the right window on click.
   `Done when:` lines, the PR title, the gate record — as written, and `tracker:`
   (`github` default, or `jira`) with an optional
   `jira:` map (`site:` for the PR's issue link, `project:` to expand a bare
-  `sapa start 1` to `GP-1`) selects the issue backend. Config stays
-  agent-interpreted — `sapa config` still just walks up and prints the file; the
-  skills read the keys the way they already read `base`, so no parser is
-  introduced. (The one script that consults config is `sapa start`, which greps
-  the printed config for `tracker`/`project` to expand a bare number — a read,
-  not a parser.)
+  `sapa start 1` to `GP-1`) selects the issue backend. Config is mostly
+  agent-interpreted — `sapa config` walks up and prints the file, and the skills
+  read the keys they need the way they already read `base`. Two helpers read it
+  themselves: `sapa start` greps the printed config for `tracker`/`project` to
+  expand a bare number, and `sapa gate` parses it with PyYAML. The gate is the
+  exception on purpose. Walking an ordered list of step maps is past what a grep
+  reads honestly, and unlike the other phases the gate's step execution is what
+  everything downstream trusts, so it earns a real parser and the tests that come
+  with it. That makes PyYAML a dependency of `sapa gate` alone; every other
+  command still runs on git and gh.
 - **Changed-file contract for `run:` steps.** The gate rebases onto
   `<remote>/<base>` before it runs, so it already holds the diff against what will
   merge. It hands that to every `run:` step as `SAPA_BASE` and
@@ -192,10 +196,11 @@ me through my existing notification hook, which opens the right window on click.
   recomputed the base did so slightly wrong. It lets a monorepo verify script gate
   only the changed packages and fall back to all on a cross-cutting change, while
   sapa stays out of package discovery and version-manager handling, which vary too
-  much per repo and are already covered by the `run:` prefix. It stays
-  agent-interpreted: the gate skill exports what it already computed during the
-  rebase, so no new command or parser is introduced. Structured per-package step
-  results are a later refinement, built once changed-package scoping proves out.
+  much per repo and are already covered by the `run:` prefix. `sapa gate` computes
+  the diff and sets both variables on each step's environment, so the contract is
+  executed by one tested helper rather than reproduced from prose per session.
+  Structured per-package step results are a later refinement, built once
+  changed-package scoping proves out.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
   single invocation carries a stream from its issue through plan, build, gate,
   PR, and watch by invoking each phase skill in turn, with no second command. It
@@ -321,7 +326,9 @@ me through my existing notification hook, which opens the right window on click.
   per-step `model:` key on gate steps — review is the one judgment-dense moment
   that is bounded, token-light, and needs no mid-task developer interaction, and
   a fresh-context reviewer avoids author-reviews-own-work bias regardless of
-  model. The key stays agent-interpreted like `plan:` and `pr:`. Reserve
+  model. `sapa gate` reads the key and reports it on the step's `needs-skill`
+  line, but honouring it stays with the skill: pinning a model means spawning a
+  sub-agent, which needs the harness. Reserve
   positions: if cost tightens further, the advisor posture — Sonnet sessions
   with Fable pinned at plan and review — is the designed fallback at roughly 92%
   of solo quality for 63% of the price; if quality headroom is wanted later, the
@@ -407,7 +414,10 @@ me through my existing notification hook, which opens the right window on click.
   ownership-lock logic for the PR body), `sapa issue` (branch-to-identity
   derivation for both backends, and the plan-comment find/create/overwrite plus
   ADF flatten and marker injection, with `gh` and `acli` both stubbed on PATH),
-  `sapa watch` (the poll
+  `sapa gate` (the step walk: the `SAPA_BASE`/`SAPA_CHANGED_FILES` contract against
+  a fixture repo's real merge-base diff, fail-fast on a failing step, the halt at a
+  `skill:` step and the `--after` resume, the plan present/absent signal, and the
+  config errors), `sapa watch` (the poll
   emitter: the empty/failed-fetch guard, dedup against last-seen state, each event
   type, and terminal-state exit, with `gh` stubbed on PATH), `sapa start`
   (issue-to-branch-name derivation, including Jira keys and bare-number expansion),
