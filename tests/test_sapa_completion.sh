@@ -54,6 +54,12 @@ if grep -q 'words\[CURRENT\]} == -\*' <<<"$teardown_branch"; then ok "teardown g
 config_branch="$(awk '/^    config\)/{f=1} f{print} f&&/;;/{exit}' <<<"$out")"
 if grep -q -- '--start\[.*_files -/' <<<"$config_branch"; then ok "config --start completes directories"; else bad "config --start completes directories"; fi
 if grep -q 'init\\:' <<<"$config_branch"; then ok "config offers the init subcommand"; else bad "config offers the init subcommand"; fi
+gate_branch="$(awk '/^    gate\)/{f=1} f{print} f&&/;;/{exit}' <<<"$out")"
+gate_missing=""
+for flag in --after --result --summary --list --report --start; do
+  grep -q -- "$flag\[" <<<"$gate_branch" || gate_missing="$gate_missing $flag"
+done
+if [ -z "$gate_missing" ]; then ok "gate offers every flag"; else bad "gate offers every flag (missing:$gate_missing)"; fi
 # The wiring self-heals when the enable line lands before compinit.
 if grep -q 'functions\[compdef\]' <<<"$out"; then ok "guards compdef wiring behind compinit"; else bad "guards compdef wiring behind compinit"; fi
 

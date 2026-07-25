@@ -21,18 +21,51 @@ so a step's own output streaming through the same stdout can't be mistaken for
 one):
 
     sapa-gate  plan         <absolute-path>  present|absent
-    sapa-gate  step         <name>  run  <exit>  <seconds>
+    sapa-gate  step         <name>  run    <exit>     <seconds>
+    sapa-gate  step         <name>  skill  pass|fail  -
     sapa-gate  needs-skill  <name>  <skill>  <model-or-->
     sapa-gate  done         green
     sapa-gate  list         <name>  <kind>  <command-or-skill>  <model-or-->
 
 A `skill:` step needs the agent harness, so the helper stops when it reaches one
 rather than trying to run it: it emits `needs-skill` and exits 4. The skill
-invokes it and resumes the walk with `--after <name>`. Stopping (instead of
-running every `run:` step in one pass and reporting the skill steps at the end)
-is what keeps the configured order and the fail-fast behaviour intact — a gate
-that declares `review` before `test` must not silently become `test` then
-`review`.
+invokes it and resumes the walk with `--after <name>`, carrying the step's outcome
+back on the same call as `--result`/`--summary`. Stopping (instead of running every
+`run:` step in one pass and reporting the skill steps at the end) is what keeps the
+configured order and the fail-fast behaviour intact — a gate that declares `review`
+before `test` must not silently become `test` then `review`.
+
+The gate record
+---------------
+
+A green gate used to be a sentence in a chat log. The walk now writes what it did
+to `$(sapa tmp)/gate-record.json`, and `--report` renders that into the `## Gates`
+section `sapa-submit` puts on the PR, so a reviewer can see which axes ran instead
+of taking the word of the session that ran them.
+
+The file is `{"runs": [...]}`, appended to rather than overwritten. A bare
+invocation appends a run;
+`--after` adds steps to the last one. Appending rather than overwriting is what lets
+a later gate of a narrower scope sit beside the run that had the full one (#99), and
+the report reads the last run. Old runs age out past MAX_RUNS.
+
+Each run stamps the head and base SHAs it gated, its scope (always `full` here),
+its result, and which of four states the plan lookup landed in. Each step records
+its name, kind, command or skill, model, result, duration, and a tail of its output.
+
+A `run:` step's result is an exit code the helper watched. A `skill:` step's is what
+the agent reported on the resume call, and is stored (and printed) marked as such,
+because collapsing the two into one undifferentiated "passed" is the thing this
+record exists to stop.
+
+`--after` whose record is missing, unparseable, or whose current run does not cover
+the steps before the resume point ignores the resume point and walks from the top.
+Redoing a step is cheaper than publishing a record that understates the gate.
+
+Capturing a tail means reading a step's output rather than letting it write to our
+descriptors, which would cost every gate run its colors and in-place progress. So
+each of stdout and stderr gets a pty when our matching stream is a terminal and a
+plain pipe when it is not, and the two stay separate on the way out.
 
 Every `run:` step is given the diff against what will merge, as two environment
 variables:
@@ -57,16 +90,21 @@ left makes no plan lookup at all.
 
 Exit codes:
 
-    0  every remaining step passed
-    1  a `run:` step failed (the walk stops there)
+    0  every remaining step passed (or `--list`/`--report` printed and exited)
+    1  a step failed — a `run:` step's own exit, or a `skill:` step the agent
+       resumed with `--result fail`. The walk stops there either way.
     2  a config or usage error — no config, no `gate:` steps, a malformed step,
-       an unknown `--after` name, or PyYAML missing
+       an unknown `--after` name, `--result` without `--after` or against a `run:`
+       step, or PyYAML missing
     4  stopped at a `skill:` step awaiting dispatch
 
 Usage:
     sapa gate                  # run the gate from the top
     sapa gate --after NAME     # resume with the step after NAME (a handled skill)
+      --result pass|fail       #   what that skill step reported (default pass)
+      --summary TEXT           #   one line on what it found
     sapa gate --list           # print the resolved steps, run nothing
+    sapa gate --report         # print the `## Gates` section, run nothing
     sapa gate --start DIR      # discover the config from DIR instead of $PWD
 
 The config is located by `sapa config`, so discovery is the same walk-up every
@@ -78,9 +116,17 @@ grep-the-printed-config reads elsewhere in sapa can do honestly.
 from __future__ import annotations
 
 import argparse
+import datetime
+import fcntl
+import json
 import os
+import pty
+import re
+import select
+import struct
 import subprocess
 import sys
+import termios
 import time
 
 try:
@@ -99,6 +145,23 @@ EXIT_CONFIG = 2
 EXIT_NEEDS_SKILL = 4
 
 BIN = os.path.dirname(os.path.realpath(__file__))
+
+# The record lives beside the materialized plan in the stream's scratch directory.
+RECORD_NAME = "gate-record.json"
+
+# How many runs the record keeps. A long-lived stream re-gates many times and the
+# file is scratch, not history, so old runs age out rather than growing forever.
+MAX_RUNS = 20
+
+# How much of a step's output the record keeps. Two caps, whichever bites first,
+# so neither a chatty suite nor one enormous line turns the record into a log.
+TAIL_LINES = 40
+TAIL_CHARS = 4000
+TAIL_KEEP_BYTES = 65536  # raw bytes held while streaming, trimmed down at the end
+
+# CSI sequences and the shorter two-byte escapes. Colors are worth having on the
+# terminal and worth not having in a JSON field a human reads.
+ANSI = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
 
 
 class ConfigError(Exception):
@@ -229,55 +292,397 @@ def changed_files(remote: str, base: str, cwd: str) -> str:
     return (proc.stdout or "").strip("\n")
 
 
-def materialize_plan(cwd: str) -> tuple[str, bool]:
-    """Write the recorded plan comment to `$(sapa tmp)/plan.md`. Returns (path, present).
-
-    Exit 3 from the read helper means no plan comment is recorded. Nothing is
-    written in that case, so a caller that only checks for the file can't mistake
-    an unrecorded plan for an empty one. Any other failure (no `gh`, no network,
-    not a stream) is reported on stderr and also counts as absent: the gate is not
-    the place to hard-fail on it, but the skill must know the spec axis has no
-    source, and the warning is what tells it "could not check" rather than "no
-    plan exists".
-    """
+def scratch_dir(cwd: str) -> str:
+    """This stream's scratch directory, via `sapa tmp` so the keying is shared."""
     code, out, err = run_helper("sapa-tmp", "--start", cwd)
     if code != 0 or not out.strip():
         raise ConfigError(f"could not resolve a scratch directory: {err or 'sapa tmp failed'}")
-    path = os.path.join(out.strip(), "plan.md")
+    return out.strip()
+
+
+def materialize_plan(cwd: str, scratch: str) -> tuple[str, str]:
+    """Write the recorded plan comment to `<scratch>/plan.md`. Returns (path, state).
+
+    The state is one of `present`, `absent`, or `unreadable`, and the difference
+    between the last two matters: exit 3 from the read helper means no plan comment
+    is recorded, while any other failure (no `gh`, no network, not a stream) means
+    the gate could not find out. Nothing is written in either case, so a caller that
+    only checks for the file can't mistake an unrecorded plan for an empty one.
+
+    Neither one fails the gate — running before a plan is recorded is legitimate —
+    but both have to reach the record and the report, because "no plan exists" and
+    "could not check" call for different follow-up. The emitted line still collapses
+    the two to `absent`, which is all the skill needs to decide what to warn about.
+    """
+    path = os.path.join(scratch, "plan.md")
 
     code, out, err = run_helper("sapa-issue", "plan-comment", "--read", "--start", cwd)
     if code == 3:
-        return path, False
+        return path, "absent"
     if code != 0:
         sys.stderr.write(f"sapa gate: could not read the plan comment "
                          f"({err or 'sapa issue failed'})\n")
-        return path, False
+        return path, "unreadable"
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(out)
     except OSError as exc:
         sys.stderr.write(f"sapa gate: could not write {path} ({exc})\n")
-        return path, False
-    return path, True
+        return path, "unreadable"
+    return path, "present"
 
 
-def run_step(step: dict, cwd: str, base: str, changed: str) -> int:
-    """Run one `run:` step under the env contract, emit its result line, return its exit."""
+def git_sha(ref: str, cwd: str) -> str | None:
+    """The commit `ref` names, or None when it won't resolve (never fetched, renamed).
+
+    None is a legitimate value in the record: a gate run against a base the machine
+    has never fetched is still a gate run, and the report says the SHA is unknown
+    rather than pretending to one.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError:
+        return None
+    return (proc.stdout or "").strip() or None
+
+
+def load_record(path: str) -> dict | None:
+    """The record at `path`, or None when there isn't a usable one.
+
+    Missing and unparseable collapse to the same answer on purpose: the one caller
+    that asks is a resume looking for a run to append to, and neither case gives it
+    one. Both take the same recovery, which is to walk from the top.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("runs"), list):
+        return None
+    return {"runs": [r for r in data["runs"] if isinstance(r, dict)]}
+
+
+def save_record(path: str, record: dict) -> None:
+    """Write the record atomically, oldest runs dropped past the cap.
+
+    A write that fails is a warning, never a gate failure: the gate's job is
+    checking the work, and losing the record costs disclosure rather than
+    correctness. `sapa gate --report` says no record was found, which is true.
+    """
+    record["runs"] = record["runs"][-MAX_RUNS:]
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+        os.replace(tmp, path)
+    except OSError as exc:
+        sys.stderr.write(f"sapa gate: could not write the gate record to {path} ({exc})\n")
+
+
+def new_run(cwd: str, base: str, remote: str) -> dict:
+    """A fresh run entry, stamped with what it is about to gate.
+
+    `scope` is always `full` here. It exists because #99 adds a path that gates only
+    the `run:` steps before pushing a CI fix, and the report has to distinguish a
+    commit that got the whole gate from one that got the mechanical subset.
+    """
+    # Microseconds kept: two runs of a fast gate can land in the same second, and
+    # the timestamp is what orders them for a human reading the file.
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return {
+        "started": now.isoformat().replace("+00:00", "Z"),
+        "scope": "full",
+        "result": "incomplete",
+        "base_ref": f"{remote}/{base}",
+        "base_sha": git_sha(f"{remote}/{base}", cwd),
+        "head_sha": git_sha("HEAD", cwd),
+        "spec_source": "not-looked-up",
+        "steps": [],
+    }
+
+
+def resumable(record: dict | None, steps: list[dict], after: str) -> bool:
+    """True when the record's current run really covers everything before `after`.
+
+    A resume appends to the last run, so that run has to be the one that stopped at
+    this skill step: still incomplete, and holding exactly the steps the config puts
+    ahead of the resume point. No record at all, a run that already finished, or a
+    run from a different config would each leave a record understating what the gate
+    covered, and a record that understates the gate is the failure this whole file
+    exists to prevent. Walking again costs one repeated step; the alternative costs
+    the truth.
+    """
+    if not record or not record.get("runs"):
+        return False
+    run = record["runs"][-1]
+    if run.get("result") != "incomplete":
+        return False
+    names = [s["name"] for s in steps]
+    expected = names[:names.index(after)]
+    return [s.get("name") for s in run.get("steps", [])] == expected
+
+
+def skill_entry(step: dict, result: str | None, summary: str | None) -> dict:
+    """The record entry for a `skill:` step, built from what the agent reported back.
+
+    `reported_by` is the point of the whole thing. The helper never ran this step, so
+    its result is an assertion where a `run:` step's exit code is an observation, and
+    a record that presented the two as the same kind of claim would be the problem it
+    was written to fix. No duration is invented either, because nothing measured one.
+
+    A resume that says nothing counts as a reported pass: continuing the walk is the
+    agent's judgement that the step passed, and it is honest to record that as what
+    it is rather than leave the step out of the account entirely.
+    """
+    return {
+        "name": step["name"],
+        "kind": "skill",
+        "target": step["target"],
+        "model": step["model"] or None,
+        "result": result or "pass",
+        "summary": summary or None,
+        "reported_by": "agent",
+        "duration": None,
+    }
+
+
+def finish_run(record: dict, path: str, cwd: str, result: str) -> None:
+    """Close the current run with its outcome and the head it actually finished on."""
+    run = record["runs"][-1]
+    run["result"] = result
+    # Re-stamp the head: a `skill:` step earlier in the walk may have committed a
+    # fix, and the commit worth recording is the one the gate ended on.
+    run["head_sha"] = git_sha("HEAD", cwd) or run.get("head_sha")
+    save_record(path, record)
+
+
+def tail_of(raw: bytes) -> str:
+    """The end of a step's output, decoded and cleaned up for the record.
+
+    Escapes come out, and a line rewritten in place by carriage returns collapses to
+    what a terminal would actually be showing, so a progress bar contributes one line
+    rather than four hundred.
+    """
+    text = ANSI.sub(b"", raw).decode("utf-8", "replace").replace("\r\n", "\n")
+    lines = [line.rsplit("\r", 1)[-1] for line in text.split("\n")[-TAIL_LINES:]]
+    return "\n".join(lines)[-TAIL_CHARS:].strip("\n")
+
+
+def match_window_size(fd: int) -> None:
+    """Size a pty to our own terminal, so a step's output wraps where it should."""
+    try:
+        size = os.get_terminal_size(sys.stdout.fileno())
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", size.lines, size.columns, 0, 0))
+    except (OSError, ValueError):
+        pass
+
+
+def channel(stream) -> tuple[int, int]:
+    """(child fd, our fd) for one output channel of a step. Decided per stream.
+
+    A pty when our matching stream is a terminal, so the step keeps the colors and
+    in-place progress it would have had if it were talking to the terminal directly.
+    A plain pipe when it is not, because handing a redirected gate's child a fake
+    terminal buys nothing and fills the log with progress-bar spam.
+
+    Reading the output at all is what forces this choice: capturing a tail means the
+    step can no longer write straight to our descriptors.
+    """
+    if stream.isatty():
+        ours, child = pty.openpty()
+        match_window_size(ours)
+        return child, ours
+    read_fd, write_fd = os.pipe()
+    return write_fd, read_fd
+
+
+def pump(sources: dict) -> bytearray:
+    """Stream every source through to its own output, keeping a copy of the tail.
+
+    stdout and stderr stay separate on the way out, the way they were when steps
+    wrote to our descriptors directly, so a caller redirecting one of them still gets
+    what it expects. The kept copy interleaves them in read order, which is what
+    makes a tail worth reading.
+    """
+    kept = bytearray()
+    remaining = dict(sources)
+    while remaining:
+        try:
+            ready, _, _ = select.select(list(remaining), [], [])
+        except (OSError, ValueError):
+            break
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                chunk = b""  # EIO: a pty whose child just closed the last slave fd
+            if not chunk:
+                remaining.pop(fd, None)
+                continue
+            remaining[fd].write(chunk)
+            remaining[fd].flush()
+            kept.extend(chunk)
+            del kept[:-TAIL_KEEP_BYTES]
+    return kept
+
+
+def capture(cmd: str, cwd: str, env: dict) -> tuple[int, str]:
+    """Run `cmd`, stream its output through ours, and return (exit code, tail)."""
+    out_child, out_ours = channel(sys.stdout)
+    err_child, err_ours = channel(sys.stderr)
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        try:
+            proc = subprocess.Popen(cmd, shell=True, cwd=cwd, env=env,
+                                    stdout=out_child, stderr=err_child)
+        finally:
+            os.close(out_child)
+            os.close(err_child)
+        kept = pump({out_ours: sys.stdout.buffer, err_ours: sys.stderr.buffer})
+        return proc.wait(), tail_of(kept)
+    finally:
+        for fd in (out_ours, err_ours):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def run_step(step: dict, cwd: str, base: str, changed: str) -> dict:
+    """Run one `run:` step under the env contract, emit its result line, return its record entry."""
     env = dict(os.environ)
     env["SAPA_BASE"] = base
     env["SAPA_CHANGED_FILES"] = changed
-    sys.stdout.flush()  # keep our lines ordered against the step's own output
     started = time.monotonic()
     try:
-        code = subprocess.run(step["target"], shell=True, cwd=cwd, env=env).returncode
+        code, tail = capture(step["target"], cwd, env)
     except OSError as exc:
         sys.stderr.write(f"sapa gate: could not run step {step['name']!r} ({exc})\n")
-        code = 127
-    emit("step", step["name"], "run", code, f"{time.monotonic() - started:.1f}")
-    return code
+        code, tail = 127, ""
+    duration = round(time.monotonic() - started, 1)
+    emit("step", step["name"], "run", code, f"{duration:.1f}")
+    return {
+        "name": step["name"],
+        "kind": "run",
+        "target": step["target"],
+        "model": step["model"] or None,
+        "result": "pass" if code == 0 else "fail",
+        "exit": code,
+        "duration": duration,
+        "tail": tail,
+    }
 
 
-def gate(start: str, after: str | None, list_only: bool) -> int:
+NO_RECORD = ("No gate record was found for this branch, so there is no account of what "
+             "sapa checked. The record is written by `sapa gate` and lives in the "
+             "stream's scratch directory, which does not survive a reboot.")
+
+# What the report says about the plan, per state. Each states what sapa observed
+# rather than what it concludes: sapa cannot tell whether a `skill:` step is a spec
+# review or whether a `run:` step is not, so a line claiming spec compliance went
+# unchecked would be a verdict on the repo's gate that sapa is not entitled to give.
+SPEC_SOURCE_LINES = {
+    "present": "Reviewed against the plan recorded on the issue.",
+    "absent": "No plan is recorded on the issue, so no step was given one as a spec source.",
+    "unreadable": "The recorded plan could not be read, so no step was given one as a "
+                  "spec source.",
+    "not-looked-up": "No step was given the recorded plan as a spec source.",
+}
+
+
+def short(sha: str | None) -> str | None:
+    return sha[:7] if sha else None
+
+
+def render_step(step: dict) -> str:
+    """One bullet for one step: what it was called, what kind it was, how it went.
+
+    Names, never commands. A step's name is a label its author chose and its command
+    is the fact, but the config is checked in and shows up in the diff, so a reviewer
+    who wants the command has it without the report carrying a 500-character chain.
+    """
+    name = step.get("name", "?")
+    passed = step.get("result") == "pass"
+    if step.get("kind") == "skill":
+        what = f"skill `{step.get('target', '?')}`"
+        if step.get("model"):
+            what += f" on `{step['model']}`"
+        # Said out loud on every skill bullet: the helper did not run this step, so
+        # "passed" here is the agent's report, not an exit code sapa watched.
+        return f"- **{name}**: {what}, {'passed' if passed else 'failed'}, agent-reported"
+    duration = step.get("duration")
+    secs = f"{duration:.1f}s" if isinstance(duration, (int, float)) else ""
+    if passed:
+        return f"- **{name}**: command, passed" + (f" in {secs}" if secs else "")
+    return (f"- **{name}**: command, failed (exit {step.get('exit', '?')})"
+            + (f" after {secs}" if secs else ""))
+
+
+def render_run(run: dict, head: str | None) -> list[str]:
+    """The report for one run: what it gated, what ran, and anything qualifying it."""
+    gated = short(run.get("head_sha"))
+    base_ref = run.get("base_ref") or "the base"
+    base_sha = short(run.get("base_sha"))
+    against = f"`{base_ref}@{base_sha}`" if base_sha else f"`{base_ref}` (unresolved)"
+    out = [f"Gated {f'`{gated}`' if gated else 'an unrecorded commit'} against {against}.", ""]
+
+    steps = run.get("steps") or []
+    out.extend(render_step(s) for s in steps)
+    if not steps:
+        out.append("- no steps ran")
+    out.append("")
+
+    notes = []
+    if run.get("result") == "failed":
+        notes.append("This run did not go green.")
+    elif run.get("result") == "incomplete":
+        notes.append("This run never finished, so the list above is partial.")
+    if gated and head and run.get("head_sha") != head:
+        notes.append(f"The gate ran on `{gated}`, which is not the current head "
+                     f"`{short(head)}`.")
+    notes.append(SPEC_SOURCE_LINES.get(run.get("spec_source"),
+                                       SPEC_SOURCE_LINES["not-looked-up"]))
+    out.extend(notes)
+    return out
+
+
+def render_record(record: dict | None, head: str | None) -> str:
+    """The whole `## Gates` section, ready to paste into a PR body.
+
+    Only the last run is reported. #99 adds runs that gate the `run:` steps alone
+    before pushing a CI fix, and reporting the earlier ones alongside it is that
+    issue's job; the split between this and `render_run` is where it goes.
+    """
+    out = ["## Gates", ""]
+    runs = (record or {}).get("runs") or []
+    if runs:
+        out.extend(render_run(runs[-1], head))
+    else:
+        out.append(NO_RECORD)
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def report(start: str) -> int:
+    """Print the `## Gates` section for this stream's record.
+
+    Always exit 0 with a section on stdout. A missing record is a normal state, not
+    an error: `/sapa-submit` runs on branches gated in an earlier session, and the
+    honest answer there is a section saying so rather than a failure the caller has
+    to interpret or, worse, a list rebuilt from the config naming steps nobody ran.
+    """
+    root = os.path.dirname(find_config(start))
+    rec_path = os.path.join(scratch_dir(root), RECORD_NAME)
+    sys.stdout.write(render_record(load_record(rec_path), git_sha("HEAD", root)))
+    return EXIT_OK
+
+
+def gate(start: str, after: str | None, list_only: bool,
+         result: str | None = None, summary: str | None = None) -> int:
     config_path = find_config(start)
     cfg = load_config(config_path)
     steps = resolve_steps(cfg, config_path)
@@ -292,11 +697,59 @@ def gate(start: str, after: str | None, list_only: bool) -> int:
     root = os.path.dirname(config_path)
     base = str(cfg.get("base") or "main")
     remote = str(cfg.get("remote") or "origin")
-    todo = remaining_steps(steps, after)
+    scratch = scratch_dir(root)
+    rec_path = os.path.join(scratch, RECORD_NAME)
+
+    # Usage errors first, before anything looks at the record: whether these flags
+    # make sense is a question about the arguments and the config, and answering it
+    # after a restart has already dropped `--after` would swallow the mistake.
+    if (result or summary) and not after:
+        raise ConfigError("--result and --summary describe the step named by --after, "
+                          "which was not given")
+    if (result or summary) and next(
+            (s["kind"] for s in steps if s["name"] == after), "skill") != "skill":
+        raise ConfigError(f"--result and --summary report a `skill:` step's outcome, "
+                          f"but {after!r} is a `run:` step the gate ran itself")
+
+    todo = remaining_steps(steps, after)  # raises on an `--after` naming no step
+    record = load_record(rec_path)
+
+    if after and not resumable(record, steps, after):
+        sys.stderr.write(f"sapa gate: no gate record covering the steps before {after!r}; "
+                         f"walking from the first step so the record can't understate "
+                         f"what ran\n")
+        if result or summary:
+            # Said out loud because the alternative is a reported failure vanishing:
+            # the restart has no run to attach it to, and the walk that follows will
+            # reach the step again and ask for the verdict a second time.
+            sys.stderr.write(f"sapa gate: the reported outcome for {after!r} goes with "
+                             f"it — report it again when the walk reaches that step\n")
+        after, todo, result, summary = None, steps, None, None
+
+    if after is None:
+        # A bare invocation is a new run, appended rather than replacing: #99 gates the
+        # `run:` steps alone before pushing a CI fix, and it needs the run that had
+        # the whole gate to still be here afterward.
+        record = record or {"runs": []}
+        record["runs"].append(new_run(root, base, remote))
+        save_record(rec_path, record)
+    else:
+        # Record the skill step the agent just handled, before walking on past it.
+        handled = next(s for s in steps if s["name"] == after)
+        if handled["kind"] == "skill":
+            entry = skill_entry(handled, result, summary)
+            record["runs"][-1]["steps"].append(entry)
+            save_record(rec_path, record)
+            emit("step", handled["name"], "skill", entry["result"], "-")
+            if entry["result"] == "fail":
+                finish_run(record, rec_path, root, "failed")
+                return EXIT_STEP_FAILED
 
     if any(s["kind"] == "skill" for s in todo):
-        path, present = materialize_plan(root)
-        emit("plan", path, "present" if present else "absent")
+        path, state = materialize_plan(root, scratch)
+        record["runs"][-1]["spec_source"] = state
+        save_record(rec_path, record)
+        emit("plan", path, "present" if state == "present" else "absent")
 
     changed = None  # computed on the first `run:` step, so a skill-only walk skips git
     for step in todo:
@@ -305,9 +758,14 @@ def gate(start: str, after: str | None, list_only: bool) -> int:
             return EXIT_NEEDS_SKILL
         if changed is None:
             changed = changed_files(remote, base, root)
-        if run_step(step, root, base, changed) != 0:
+        entry = run_step(step, root, base, changed)
+        record["runs"][-1]["steps"].append(entry)
+        save_record(rec_path, record)
+        if entry["exit"] != 0:
+            finish_run(record, rec_path, root, "failed")
             return EXIT_STEP_FAILED
 
+    finish_run(record, rec_path, root, "green")
     emit("done", "green")
     return EXIT_OK
 
@@ -321,14 +779,25 @@ def main() -> int:
     )
     parser.add_argument("--after", metavar="NAME",
                         help="resume with the step after NAME (the skill step just handled)")
+    parser.add_argument("--result", choices=("pass", "fail"),
+                        help="with --after: the outcome the skill step reported "
+                             "(default pass, since resuming means it passed)")
+    parser.add_argument("--summary", metavar="TEXT",
+                        help="with --after: one line on what the skill step found")
     parser.add_argument("--list", action="store_true", dest="list_only",
                         help="print the resolved steps and exit, running nothing")
+    parser.add_argument("--report", action="store_true",
+                        help="print the `## Gates` section for the recorded run, "
+                             "running nothing")
     parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd(),
                         help="discover the config from this directory instead of $PWD")
     args = parser.parse_args()
 
     try:
-        return gate(os.path.abspath(args.start), args.after, args.list_only)
+        if args.report:
+            return report(os.path.abspath(args.start))
+        return gate(os.path.abspath(args.start), args.after, args.list_only,
+                    args.result, args.summary)
     except ConfigError as exc:
         sys.stderr.write(f"sapa gate: {exc}\n")
         return EXIT_CONFIG
