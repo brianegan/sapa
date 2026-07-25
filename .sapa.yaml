@@ -2,7 +2,7 @@
 base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
-plan: grill-with-docs
+plan: grilling
 # Shape the free prose sapa writes (plan comment, PR body, review replies) with a
 # skill, run as a final pass before recording. Omit to write plainly.
 writing_style: humanizer
