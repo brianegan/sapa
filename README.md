@@ -149,7 +149,7 @@ the flow, each with a backward-compatible default:
 - `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
-  example wingspan `/plan` or `/grill-with-docs`). Omit it to use the built-in
+  example wingspan `/plan` or `/grilling`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
 - `writing_style:` — a skill sapa runs as a final pass over the free prose it
   writes: the plan comment, the PR body, and its replies to review comments (for
@@ -212,8 +212,8 @@ step that is bounded, token-light, and needs no mid-task conversation.
 base: main
 remote: origin
 pr: draft
-plan: /grill-with-docs
-writing_style: /humanizer
+plan: grilling
+writing_style: humanizer
 gate:
   max_fix_attempts: 3
   steps:
