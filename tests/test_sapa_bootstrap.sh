@@ -42,7 +42,7 @@ git -C "$src" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q
 out="$(cd "$root" && bash "$BOOTSTRAP" "$src" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ -d "$root/app/master" ]; then ok "clone checks out the master worktree"; else bad "clone checks out the master worktree (rc=$rc, $out)"; fi
 # The success message must name the branch it actually created, not always 'main'.
-if printf '%s' "$out" | grep -q "app/master"; then ok "reports the branch it created"; else bad "reports the branch it created ($out)"; fi
+if grep -q "app/master" <<<"$out"; then ok "reports the branch it created"; else bad "reports the branch it created ($out)"; fi
 
 # --- clone a main-default source: the common path picks main, not the fallback ---
 src2="$root/sources/web"

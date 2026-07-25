@@ -18,7 +18,7 @@ trap 'rm -rf "$root"' EXIT
 # --- top-level help lists the subcommands and exits 0 ---
 for flag in help -h --help; do
   out="$("$SAPA" $flag 2>&1)"; rc=$?
-  if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "bootstrap" && printf '%s' "$out" | grep -q "teardown"; then
+  if [ $rc -eq 0 ] && grep -q "bootstrap" <<<"$out" && grep -q "teardown" <<<"$out"; then
     ok "help ($flag) lists subcommands, exits 0"
   else
     bad "help ($flag) lists subcommands, exits 0 (rc=$rc)"
@@ -27,11 +27,11 @@ done
 
 # --- no subcommand prints usage and exits 2 ---
 out="$("$SAPA" 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "bootstrap"; then ok "no subcommand exits 2 with usage"; else bad "no subcommand exits 2 with usage (rc=$rc)"; fi
+if [ $rc -eq 2 ] && grep -q "bootstrap" <<<"$out"; then ok "no subcommand exits 2 with usage"; else bad "no subcommand exits 2 with usage (rc=$rc)"; fi
 
 # --- unknown subcommand errors and exits 2 ---
 out="$("$SAPA" bogus 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "unknown command"; then ok "unknown subcommand exits 2"; else bad "unknown subcommand exits 2 (rc=$rc, $out)"; fi
+if [ $rc -eq 2 ] && grep -q "unknown command" <<<"$out"; then ok "unknown subcommand exits 2"; else bad "unknown subcommand exits 2 (rc=$rc, $out)"; fi
 
 # --- routing: config walks up and prints the path ---
 mkdir -p "$root/proj/feature"
@@ -46,7 +46,7 @@ if [ $rc -eq 0 ] && [ "$out" = "42-add-a-widget" ]; then ok "routes to start"; e
 # --- routing: section reaches the Python helper and wraps content ---
 printf 'hello\n' > "$root/content.md"
 out="$(printf '' | "$SAPA" section mymark --content-file "$root/content.md" 2>/dev/null)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "<!-- sapa:mymark" && printf '%s' "$out" | grep -q "hello"; then
+if [ $rc -eq 0 ] && grep -q "<!-- sapa:mymark" <<<"$out" && grep -q "hello" <<<"$out"; then
   ok "routes to section (Python helper)"
 else
   bad "routes to section (Python helper) (rc=$rc, $out)"
@@ -58,21 +58,21 @@ if [ $rc -eq 0 ] && [ "$out" = "GP-1" ]; then ok "routes to issue"; else bad "ro
 
 # --- routing: gate reaches its helper (subhelp is a cheap, network-free probe) ---
 out="$("$SAPA" gate --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa gate"; then ok "routes to gate"; else bad "routes to gate (rc=$rc, $out)"; fi
+if [ $rc -eq 0 ] && grep -q "sapa gate" <<<"$out"; then ok "routes to gate"; else bad "routes to gate (rc=$rc, $out)"; fi
 
 # --- routing: watch reaches its helper (subhelp is a cheap, network-free probe) ---
 out="$("$SAPA" watch --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa watch"; then ok "routes to watch"; else bad "routes to watch (rc=$rc, $out)"; fi
+if [ $rc -eq 0 ] && grep -q "sapa watch" <<<"$out"; then ok "routes to watch"; else bad "routes to watch (rc=$rc, $out)"; fi
 
 # --- routing: uninstall reaches its own helper (subhelp is a network-free probe) ---
 out="$("$SAPA" uninstall --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa uninstall"; then ok "routes to uninstall"; else bad "routes to uninstall (rc=$rc, $out)"; fi
+if [ $rc -eq 0 ] && grep -q "sapa uninstall" <<<"$out"; then ok "routes to uninstall"; else bad "routes to uninstall (rc=$rc, $out)"; fi
 
 # --- subhelp: `sapa <cmd> --help` shows that command's own help ---
 out="$("$SAPA" config --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "sapa config"; then ok "config --help shows subcommand help"; else bad "config --help shows subcommand help (rc=$rc)"; fi
+if [ $rc -eq 0 ] && grep -q "sapa config" <<<"$out"; then ok "config --help shows subcommand help"; else bad "config --help shows subcommand help (rc=$rc)"; fi
 out="$("$SAPA" section --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "usage:"; then ok "section --help shows subcommand help"; else bad "section --help shows subcommand help (rc=$rc)"; fi
+if [ $rc -eq 0 ] && grep -q "usage:" <<<"$out"; then ok "section --help shows subcommand help"; else bad "section --help shows subcommand help (rc=$rc)"; fi
 
 # --- resolves helpers through an install-style symlink ---
 # sapa-install links only `sapa` onto PATH; invoked through that link the

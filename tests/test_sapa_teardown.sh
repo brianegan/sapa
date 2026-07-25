@@ -83,7 +83,7 @@ git -C "$proj/main" worktree add -q "$proj/denied" -b denied
 denier="$(mktemp)"
 printf '#!/bin/bash\necho "error:-25211"\n' > "$denier"; chmod +x "$denier"
 err="$(SAPA_TEARDOWN_CLOSER="$denier" bash "$TEARDOWN" "$proj/denied" 2>&1 >/dev/null)"; rc=$?
-if [ $rc -eq 0 ] && [ ! -d "$proj/denied" ] && printf '%s' "$err" | grep -qi "Accessibility"; then
+if [ $rc -eq 0 ] && [ ! -d "$proj/denied" ] && grep -qi "Accessibility" <<<"$err"; then
   ok "denied close prints Accessibility hint and still succeeds"
 else
   bad "denied close hint (rc=$rc, err: $err)"
