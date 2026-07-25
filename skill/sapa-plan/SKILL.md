@@ -32,7 +32,7 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
 3. **Plan with the user.** Check the config for a planning skill: run
    `sapa config -p` and look for a `plan:` key. If it names a skill, invoke that
    skill to run the discussion (for example wingspan `/plan` or
-   `/grill-with-docs`); if there is no config or no `plan:` key, discuss the
+   `/grilling`); if there is no config or no `plan:` key, discuss the
    approach here. Either way keep the plan about intent and decisions, not
    file-by-file code, and always continue to step 4 — recording it on the issue
    is sapa's durable value no matter who developed the plan.
@@ -66,7 +66,7 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
    way it does — the key choices and their rationale ("chose X over Y because Z")
    plus the notable questions planning surfaced and how they resolved, including
    the WHAT-level decisions step 3 surfaced and the answer each one got. If the
-   planning skill ran a discussion (for example grill-with-docs), distil its
+   planning skill ran a discussion (for example grilling), distil its
    questions and answers here. Distil, do not transcribe: the value is the
    reasoning a later reader needs to understand the feature, not a verbatim log.
    This section is what makes the recorded plan explain itself once the session is

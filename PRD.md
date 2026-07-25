@@ -374,7 +374,7 @@ me through my existing notification hook, which opens the right window on click.
   issue body, which stays byte-for-byte as the author wrote it. That one comment
   carries both the plan and a "Decisions & Discussions" section (#78) distilling
   why the plan looks the way it does — the choices, their rationale, and the
-  questions planning surfaced (e.g. a grill-with-docs discussion) — so a later
+  questions planning surfaced (e.g. a grilling discussion) — so a later
   reader understands why a feature was built the way it was, not only what it
   does. The plan is
   reconciled at submit (if the build diverged) and when review feedback materially
@@ -382,7 +382,7 @@ me through my existing notification hook, which opens the right window on click.
   The PR does not repeat the plan; it links the issue (`Closes #N` on GitHub, a
   `Jira: <browse-url>` line on Jira). How the plan is *developed* is pluggable:
   `plan:` can point `/sapa-plan` at another skill (wingspan `/plan`,
-  `/grill-with-docs`) to run the discussion, but the record-to-issue-comment step
+  `/grilling`) to run the discussion, but the record-to-issue-comment step
   always runs, since that durable capture — not the dialogue style — is sapa's
   contribution.
 - **Plan comment is not edit-locked (#77).** Revised from the original design,
