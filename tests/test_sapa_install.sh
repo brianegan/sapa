@@ -35,7 +35,7 @@ if [ "$(readlink "$bin_dir/sapa")" = "$clone/bin/sapa" ]; then ok "sapa target p
 if readlink "$home/.claude/skills/sapa-plan" | grep -q '/skill/sapa-plan$'; then ok "skill target points into the clone"; else bad "skill target points into the clone"; fi
 
 # --- install prints a copy-paste-and-run completion hint (shell config untouched) ---
-if printf '%s' "$out" | grep -qF "echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc"; then ok "install hints at completion"; else bad "install hints at completion ($out)"; fi
+if grep -qF "echo 'eval \"\$(sapa completion zsh)\"' >> ~/.zshrc" <<<"$out"; then ok "install hints at completion"; else bad "install hints at completion ($out)"; fi
 
 # --- re-running is idempotent ---
 out="$(HOME="$home" bash "$INSTALL" 2>&1)"; rc=$?
@@ -73,7 +73,7 @@ fi
 
 # --- install no longer handles uninstall; it points at the new command ---
 out="$(HOME="$home" bash "$INSTALL" uninstall 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "sapa uninstall"; then ok "install rejects uninstall, points at 'sapa uninstall'"; else bad "install rejects uninstall (rc=$rc, $out)"; fi
+if [ $rc -eq 2 ] && grep -q "sapa uninstall" <<<"$out"; then ok "install rejects uninstall, points at 'sapa uninstall'"; else bad "install rejects uninstall (rc=$rc, $out)"; fi
 
 # --- run-state status hooks: wired on install, idempotent, and never touching
 #     hooks the user already has (removal is covered in test_sapa_uninstall.sh) ---
@@ -120,7 +120,7 @@ if [ "$(count_hook "$sf" UserPromptSubmit 'status --state busy')" = "1" ] \
 else
   bad "install wires the four run-state status hooks (rc=$rc, $out)"
 fi
-if printf '%s' "$out" | grep -q "wired run-state status hooks"; then ok "install reports wiring the hooks"; else bad "install reports wiring the hooks ($out)"; fi
+if grep -q "wired run-state status hooks" <<<"$out"; then ok "install reports wiring the hooks"; else bad "install reports wiring the hooks ($out)"; fi
 if [ "$(count_hook "$sf" Stop 'keep-me.sh')" = "1" ]; then ok "install preserves an existing hook"; else bad "install preserves an existing hook"; fi
 if [ "$(count_hook "$sf" Stop "$clone/bin/sapa status --state idle")" = "1" ]; then ok "hook command uses the absolute clone path"; else bad "hook command uses the absolute clone path"; fi
 # Model key (and anything else) survives the JSON round-trip.
@@ -170,7 +170,7 @@ fi
 
 # --- --help works ---
 out="$(bash "$INSTALL" --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "Usage:"; then ok "--help prints usage"; else bad "--help prints usage (rc=$rc)"; fi
+if [ $rc -eq 0 ] && grep -q "Usage:" <<<"$out"; then ok "--help prints usage"; else bad "--help prints usage (rc=$rc)"; fi
 
 echo
 echo "$pass/$((pass+fail)) passed"

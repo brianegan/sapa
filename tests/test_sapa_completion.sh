@@ -4,6 +4,13 @@
 # dispatcher (and its install symlink), and emits a script zsh actually parses —
 # including descriptions that contain apostrophes.
 # Run: bash tests/test_sapa_completion.sh
+#
+# Assertions read a captured string with a herestring, never `printf … | grep`.
+# Under pipefail a reader that exits on its first match (grep -q, awk with exit)
+# leaves the writer to take EPIPE, and printf's non-zero status becomes the
+# pipeline's — so a found pattern reports as not found. It fires only when the
+# output is long enough to need a second write, which made it a flake that grew
+# with the completion script.
 
 set -uo pipefail
 
@@ -24,43 +31,43 @@ cmds="$("$SAPA" help | awk '/^Commands:/{f=1;next} f&&/^$/{f=0} f&&/^  /{print $
 # --- `sapa completion zsh` emits a usable zsh function ---
 out="$("$SAPA" completion zsh 2>&1)"; rc=$?
 if [ $rc -eq 0 ]; then ok "completion zsh exits 0"; else bad "completion zsh exits 0 (rc=$rc, $out)"; fi
-if printf '%s' "$out" | grep -q "_sapa()"; then ok "defines the _sapa function"; else bad "defines the _sapa function"; fi
-if printf '%s' "$out" | grep -q "compdef _sapa sapa"; then ok "wires compdef to sapa"; else bad "wires compdef to sapa"; fi
+if grep -q "_sapa()" <<<"$out"; then ok "defines the _sapa function"; else bad "defines the _sapa function"; fi
+if grep -q "compdef _sapa sapa" <<<"$out"; then ok "wires compdef to sapa"; else bad "wires compdef to sapa"; fi
 
 # --- every subcommand shows up as a completion candidate ---
 missing=""
 for c in $cmds; do
-  printf '%s' "$out" | grep -q "'$c:" || missing="$missing $c"
+  grep -q "'$c:" <<<"$out" || missing="$missing $c"
 done
 if [ -z "$missing" ]; then ok "covers every subcommand"; else bad "covers every subcommand (missing:$missing)"; fi
 
 # --- descriptions are scraped, not empty (a distinctive phrase from the help) ---
-if printf '%s' "$out" | grep -q "worktree layout"; then ok "includes scraped descriptions"; else bad "includes scraped descriptions"; fi
+if grep -q "worktree layout" <<<"$out"; then ok "includes scraped descriptions"; else bad "includes scraped descriptions"; fi
 
 # --- argument completion: teardown and config --start complete directories ---
 # (regression for the reported bug: `sapa teardown <TAB>` offered `--force`
 # instead of directories. The branch now completes directories on a blank word
 # and only offers the options when the current word is dash-prefixed.)
-teardown_branch="$(printf '%s' "$out" | awk '/^    teardown\)/{f=1} f{print} f&&/;;/{exit}')"
-if printf '%s' "$teardown_branch" | grep -q '_files -/'; then ok "teardown completes directories"; else bad "teardown completes directories"; fi
-if printf '%s' "$teardown_branch" | grep -q 'words\[CURRENT\]} == -\*'; then ok "teardown gates options behind a dash prefix"; else bad "teardown gates options behind a dash prefix"; fi
-config_branch="$(printf '%s' "$out" | awk '/^    config\)/{f=1} f{print} f&&/;;/{exit}')"
-if printf '%s' "$config_branch" | grep -q -- '--start\[.*_files -/'; then ok "config --start completes directories"; else bad "config --start completes directories"; fi
-if printf '%s' "$config_branch" | grep -q 'init\\:'; then ok "config offers the init subcommand"; else bad "config offers the init subcommand"; fi
+teardown_branch="$(awk '/^    teardown\)/{f=1} f{print} f&&/;;/{exit}' <<<"$out")"
+if grep -q '_files -/' <<<"$teardown_branch"; then ok "teardown completes directories"; else bad "teardown completes directories"; fi
+if grep -q 'words\[CURRENT\]} == -\*' <<<"$teardown_branch"; then ok "teardown gates options behind a dash prefix"; else bad "teardown gates options behind a dash prefix"; fi
+config_branch="$(awk '/^    config\)/{f=1} f{print} f&&/;;/{exit}' <<<"$out")"
+if grep -q -- '--start\[.*_files -/' <<<"$config_branch"; then ok "config --start completes directories"; else bad "config --start completes directories"; fi
+if grep -q 'init\\:' <<<"$config_branch"; then ok "config offers the init subcommand"; else bad "config offers the init subcommand"; fi
 # The wiring self-heals when the enable line lands before compinit.
-if printf '%s' "$out" | grep -q 'functions\[compdef\]'; then ok "guards compdef wiring behind compinit"; else bad "guards compdef wiring behind compinit"; fi
+if grep -q 'functions\[compdef\]' <<<"$out"; then ok "guards compdef wiring behind compinit"; else bad "guards compdef wiring behind compinit"; fi
 
 # --- a missing or unsupported shell is a usage error (exit 2) ---
 out="$("$SAPA" completion 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "usage: sapa completion zsh"; then ok "no shell exits 2 with usage"; else bad "no shell exits 2 with usage (rc=$rc, $out)"; fi
+if [ $rc -eq 2 ] && grep -q "usage: sapa completion zsh" <<<"$out"; then ok "no shell exits 2 with usage"; else bad "no shell exits 2 with usage (rc=$rc, $out)"; fi
 out="$("$SAPA" completion bash 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "unsupported shell"; then ok "unsupported shell exits 2"; else bad "unsupported shell exits 2 (rc=$rc, $out)"; fi
+if [ $rc -eq 2 ] && grep -q "unsupported shell" <<<"$out"; then ok "unsupported shell exits 2"; else bad "unsupported shell exits 2 (rc=$rc, $out)"; fi
 
 # --- routes through an install-style symlink (only `sapa` goes on PATH) ---
 linkdir="$root/bin"; mkdir -p "$linkdir"
 ln -sfn "$(cd "$HERE/.." && pwd)/bin/sapa" "$linkdir/sapa"
 out="$("$linkdir/sapa" completion zsh 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "compdef _sapa sapa"; then ok "resolves the helper through a symlink"; else bad "resolves the helper through a symlink (rc=$rc)"; fi
+if [ $rc -eq 0 ] && grep -q "compdef _sapa sapa" <<<"$out"; then ok "resolves the helper through a symlink"; else bad "resolves the helper through a symlink (rc=$rc)"; fi
 
 # --- the emitted script is valid zsh, and apostrophes survive parsing ---
 if command -v zsh >/dev/null 2>&1; then
@@ -83,7 +90,7 @@ if command -v zsh >/dev/null 2>&1; then
   count="$(printf '%s\n' "$parsed" | sed -n 1p)"
   watchel="$(printf '%s\n' "$parsed" | sed -n 2p)"
   if [ "$count" = "$nlines" ] && [ "$count" -gt 0 ]; then ok "array parses to one element per command ($count)"; else bad "array parses to one element per command (count=$count, lines=$nlines)"; fi
-  if printf '%s' "$watchel" | grep -q "branch's"; then ok "apostrophes in descriptions survive"; else bad "apostrophes in descriptions survive ($watchel)"; fi
+  if grep -q "branch's" <<<"$watchel"; then ok "apostrophes in descriptions survive"; else bad "apostrophes in descriptions survive ($watchel)"; fi
 
   # --- every argument-taking subcommand dispatches to a real branch ---
   # Stub the completion helpers as recorders, drive _sapa for each command at the
@@ -106,7 +113,7 @@ for c in bootstrap worktree start issue config section watch teardown completion
 done
 PROBE
   probeout="$(SRC="$root/_sapa.zsh" zsh "$root/probe.zsh")"
-  if ! printf '%s' "$probeout" | grep -q MISSING; then ok "every subcommand has an argument-completion branch"; else bad "every subcommand has an argument-completion branch ($(printf '%s' "$probeout" | grep MISSING))"; fi
+  if ! grep -q MISSING <<<"$probeout"; then ok "every subcommand has an argument-completion branch"; else bad "every subcommand has an argument-completion branch ($(grep MISSING <<<"$probeout"))"; fi
 
   # --- teardown's blank word reaches directory completion directly ---
   # The reported bug: `sapa teardown <TAB>` completed nothing. The cause was
@@ -134,8 +141,8 @@ PROBE
   tdout="$(SRC="$root/_sapa.zsh" zsh "$root/teardown_probe.zsh")"
   blankline="$(printf '%s\n' "$tdout" | grep '^blank ')"
   dashline="$(printf '%s\n' "$tdout" | grep '^dash ')"
-  if printf '%s' "$blankline" | grep -q 'files=\[-/\]'; then ok "teardown blank word calls _files -/ directly"; else bad "teardown blank word calls _files -/ directly ($blankline)"; fi
-  if printf '%s' "$dashline" | grep -q 'args=\[.*--force'; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
+  if grep -q 'files=\[-/\]' <<<"$blankline"; then ok "teardown blank word calls _files -/ directly"; else bad "teardown blank word calls _files -/ directly ($blankline)"; fi
+  if grep -q 'args=\[.*--force' <<<"$dashline"; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
 else
   echo "skip zsh -n / parse checks (zsh not installed)"
 fi

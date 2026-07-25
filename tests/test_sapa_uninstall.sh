@@ -38,7 +38,7 @@ if [ ! -e "$home/.claude/skills/sapa-plan" ]; then ok "uninstall removes a claud
 if [ ! -e "$home/.codex/skills/sapa-plan" ]; then ok "uninstall removes a codex skill link"; else bad "uninstall removes a codex skill link"; fi
 if [ -f "$foreign" ]; then ok "uninstall leaves a foreign regular file"; else bad "uninstall leaves a foreign regular file"; fi
 if [ -L "$bin_dir/sapa-worktree" ]; then ok "uninstall leaves a foreign symlink"; else bad "uninstall leaves a foreign symlink"; fi
-if printf '%s' "$out" | grep -q 'sapa completion zsh'; then bad "uninstall does not print the completion hint"; else ok "uninstall does not print the completion hint"; fi
+if grep -q 'sapa completion zsh' <<<"$out"; then bad "uninstall does not print the completion hint"; else ok "uninstall does not print the completion hint"; fi
 
 # --- SAPA_AGENTS scopes which agents uninstall touches ---
 home2="$root/home2"
@@ -55,7 +55,7 @@ fi
 home3="$root/home3"
 mkdir -p "$home3/.claude"
 out="$(HOME="$home3" bash "$UNINSTALL" 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "removed 0 links"; then ok "uninstall on a clean home removes nothing, exits 0"; else bad "uninstall on a clean home (rc=$rc, $out)"; fi
+if [ $rc -eq 0 ] && grep -q "removed 0 links" <<<"$out"; then ok "uninstall on a clean home removes nothing, exits 0"; else bad "uninstall on a clean home (rc=$rc, $out)"; fi
 
 # --- uninstall removes the run-state status hooks it added, leaving others ---
 # count_hook <settings> <event> <needle>: how many hook commands under <event>
@@ -102,11 +102,11 @@ if [ ! -e "$home5/.claude/settings.json" ]; then ok "uninstall does not create a
 
 # --- unknown argument errors ---
 out="$(bash "$UNINSTALL" bogus 2>&1)"; rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "unknown argument"; then ok "unknown argument exits 2"; else bad "unknown argument exits 2 (rc=$rc, $out)"; fi
+if [ $rc -eq 2 ] && grep -q "unknown argument" <<<"$out"; then ok "unknown argument exits 2"; else bad "unknown argument exits 2 (rc=$rc, $out)"; fi
 
 # --- --help works ---
 out="$(bash "$UNINSTALL" --help 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "Usage:"; then ok "--help prints usage"; else bad "--help prints usage (rc=$rc)"; fi
+if [ $rc -eq 0 ] && grep -q "Usage:" <<<"$out"; then ok "--help prints usage"; else bad "--help prints usage (rc=$rc)"; fi
 
 echo
 echo "$pass/$((pass+fail)) passed"
