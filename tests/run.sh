@@ -18,6 +18,7 @@ run() {
 run test_sapa_dispatch.sh  bash    "$HERE/test_sapa_dispatch.sh"
 run test_sapa_section.py   python3 "$HERE/test_sapa_section.py"
 run test_sapa_issue.py     python3 "$HERE/test_sapa_issue.py"
+run test_sapa_gate.py      python3 "$HERE/test_sapa_gate.py"
 run test_sapa_watch.py     python3 "$HERE/test_sapa_watch.py"
 run test_sapa_status.py    python3 "$HERE/test_sapa_status.py"
 run test_skill_lint.py     python3 "$HERE/test_skill_lint.py"

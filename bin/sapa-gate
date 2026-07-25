@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""sapa gate — the mechanical half of running a stream's quality gate.
+
+Running the gate is two jobs. Walking the configured steps, handing each `run:`
+step the diff contract, and materializing the plan is mechanical and identical
+every time; invoking a skill, honouring its `model:` pin, and deciding whether a
+failure is a mechanical fix or an escalation is not. This helper owns only the
+mechanical half. The `sapa-gate` skill runs it and reasons about what it emits.
+
+That split is the same one `sapa watch` makes, and it exists for the same reason:
+the gate is the phase nothing downstream re-verifies — `sapa-submit` ships on its
+word — so its step execution belongs in one tested place rather than being
+re-derived from prose every session.
+
+Steps run in the directory holding the discovered `.sapa.yaml`, which is the
+project root by construction, so a `run:` command's relative paths mean the same
+thing wherever the gate was invoked from.
+
+Output (one structured line per result, tab-separated, always led by `sapa-gate`
+so a step's own output streaming through the same stdout can't be mistaken for
+one):
+
+    sapa-gate  plan         <absolute-path>  present|absent
+    sapa-gate  step         <name>  run  <exit>  <seconds>
+    sapa-gate  needs-skill  <name>  <skill>  <model-or-->
+    sapa-gate  done         green
+    sapa-gate  list         <name>  <kind>  <command-or-skill>  <model-or-->
+
+A `skill:` step needs the agent harness, so the helper stops when it reaches one
+rather than trying to run it: it emits `needs-skill` and exits 4. The skill
+invokes it and resumes the walk with `--after <name>`. Stopping (instead of
+running every `run:` step in one pass and reporting the skill steps at the end)
+is what keeps the configured order and the fail-fast behaviour intact — a gate
+that declares `review` before `test` must not silently become `test` then
+`review`.
+
+Every `run:` step is given the diff against what will merge, as two environment
+variables:
+
+    SAPA_BASE           the branch the PR targets (config `base`, default main)
+    SAPA_CHANGED_FILES  newline-separated paths from
+                        `git diff --name-only <remote>/<base>...HEAD`
+
+This is the one thing sapa knows and a shell script would reinvent — every script
+that recomputed the base did so slightly wrong. A base ref that won't resolve is a
+warning, not a failure: the variables come through empty and the gate still runs.
+
+`skill:` steps get the accepted plan as their spec source instead. When any
+remains, the plan comment is materialized once to `$(sapa tmp)/plan.md` and its
+absolute path emitted with a `present`/`absent` marker. `absent` (the read helper
+exits 3, or `gh` can't be reached) means no file is written, which is how
+plan-absent stays distinguishable from plan-empty; a read that failed for some
+other reason says why on stderr, so the skill can report the difference between
+"no plan recorded" and "could not check". It never fails the gate: `sapa gate` is
+legitimately runnable before a plan is recorded. A gate with no `skill:` steps
+left makes no plan lookup at all.
+
+Exit codes:
+
+    0  every remaining step passed
+    1  a `run:` step failed (the walk stops there)
+    2  a config or usage error — no config, no `gate:` steps, a malformed step,
+       an unknown `--after` name, or PyYAML missing
+    4  stopped at a `skill:` step awaiting dispatch
+
+Usage:
+    sapa gate                  # run the gate from the top
+    sapa gate --after NAME     # resume with the step after NAME (a handled skill)
+    sapa gate --list           # print the resolved steps, run nothing
+    sapa gate --start DIR      # discover the config from DIR instead of $PWD
+
+The config is located by `sapa config`, so discovery is the same walk-up every
+other command does. `git` and `gh` are assumed installed, as everywhere else in
+sapa; PyYAML is needed here because a nested list of step maps is past what the
+grep-the-printed-config reads elsewhere in sapa can do honestly.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+
+try:
+    import yaml
+except ImportError:  # reported as a config error, with the fix, on first use
+    yaml = None
+
+# Every structured line starts with this. `sapa watch` can lead with a bare event
+# type because nothing else writes to its stdout; the gate streams a test suite's
+# output through the same channel, so its lines need a marker of their own.
+MARKER = "sapa-gate"
+
+EXIT_OK = 0
+EXIT_STEP_FAILED = 1
+EXIT_CONFIG = 2
+EXIT_NEEDS_SKILL = 4
+
+BIN = os.path.dirname(os.path.realpath(__file__))
+
+
+class ConfigError(Exception):
+    """A problem with the config or the arguments: reported, then exit 2."""
+
+
+def emit(*fields) -> None:
+    sys.stdout.write("\t".join([MARKER] + [str(f) for f in fields]) + "\n")
+    sys.stdout.flush()
+
+
+def run_helper(name: str, *args: str) -> tuple[int, str, str]:
+    """Run a sibling helper from bin/, the way the dispatcher calls them: by path.
+
+    Returns (exit code, raw stdout, stripped stderr). stdout is left untouched
+    because one caller writes it to a file and a strip would silently reshape the
+    plan. A helper that can't start at all comes back as exit 127 with the reason
+    in stderr, so every caller handles one failure shape instead of two.
+    """
+    try:
+        proc = subprocess.run(
+            [os.path.join(BIN, name), *args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as exc:
+        return 127, "", str(exc)
+    return proc.returncode, proc.stdout or "", (proc.stderr or "").strip()
+
+
+def find_config(start: str) -> str:
+    """The discovered `.sapa.yaml` path, via `sapa config` so discovery is shared."""
+    code, out, err = run_helper("sapa-config", "--start", start)
+    path = out.strip()
+    if code != 0 or not path:
+        raise ConfigError(err or f"no .sapa.yaml found in any parent of {start}")
+    return path
+
+
+def load_config(path: str) -> dict:
+    if yaml is None:
+        raise ConfigError(
+            f"reading the gate config needs PyYAML, which is not importable by "
+            f"{sys.executable} (install it with: {sys.executable} -m pip install pyyaml)")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    except OSError as exc:
+        raise ConfigError(f"could not read {path}: {exc}")
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path} is not valid YAML: {exc}")
+    if cfg is None:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        raise ConfigError(f"{path} does not hold a mapping of settings")
+    return cfg
+
+
+def resolve_steps(cfg: dict, path: str) -> list[dict]:
+    """The ordered gate steps, normalized. Raises ConfigError on any bad shape.
+
+    Names must be unique because `--after` resolves the resume point by name;
+    two steps called `test` would make a resume ambiguous.
+    """
+    gate = cfg.get("gate")
+    if gate is None:
+        raise ConfigError(f"{path} has no `gate:` key, so there are no steps to run")
+    if not isinstance(gate, list) or not gate:
+        raise ConfigError(f"`gate:` in {path} is not a non-empty list of steps")
+
+    steps = []
+    seen = set()
+    for i, raw in enumerate(gate, 1):
+        where = f"gate step {i} in {path}"
+        if not isinstance(raw, dict):
+            raise ConfigError(f"{where} is not a mapping")
+        name = raw.get("name")
+        if not name or not isinstance(name, str):
+            raise ConfigError(f"{where} has no `name:`")
+        if name in seen:
+            raise ConfigError(f"duplicate gate step name {name!r} in {path}")
+        seen.add(name)
+        run, skill = raw.get("run"), raw.get("skill")
+        if run and skill:
+            raise ConfigError(f"gate step {name!r} has both `run:` and `skill:`")
+        if not run and not skill:
+            raise ConfigError(f"gate step {name!r} has neither `run:` nor `skill:`")
+        steps.append({
+            "name": name,
+            "kind": "run" if run else "skill",
+            "target": str(run or skill),
+            "model": str(raw.get("model") or ""),
+        })
+    return steps
+
+
+def remaining_steps(steps: list[dict], after: str | None) -> list[dict]:
+    if not after:
+        return steps
+    names = [s["name"] for s in steps]
+    if after not in names:
+        raise ConfigError(f"--after {after!r} names no gate step (have: {', '.join(names)})")
+    return steps[names.index(after) + 1:]
+
+
+def changed_files(remote: str, base: str, cwd: str) -> str:
+    """Paths this branch changed against the merge-base, newline-separated.
+
+    A base ref that won't resolve (never fetched, renamed, a gate run outside a
+    tracking branch) warns and yields an empty string. The contract already says
+    an empty value is legitimate — the branch matching the base produces one —
+    so a script handling that case handles this one, and the gate still runs.
+    """
+    ref = f"{remote}/{base}"
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--name-only", f"{ref}...HEAD"],
+            cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as exc:
+        sys.stderr.write(f"sapa gate: could not run git ({exc}); SAPA_CHANGED_FILES will be empty\n")
+        return ""
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        sys.stderr.write(f"sapa gate: could not diff against {ref} "
+                         f"({detail[-1] if detail else 'git failed'}); "
+                         f"SAPA_CHANGED_FILES will be empty\n")
+        return ""
+    return (proc.stdout or "").strip("\n")
+
+
+def materialize_plan(cwd: str) -> tuple[str, bool]:
+    """Write the recorded plan comment to `$(sapa tmp)/plan.md`. Returns (path, present).
+
+    Exit 3 from the read helper means no plan comment is recorded. Nothing is
+    written in that case, so a caller that only checks for the file can't mistake
+    an unrecorded plan for an empty one. Any other failure (no `gh`, no network,
+    not a stream) is reported on stderr and also counts as absent: the gate is not
+    the place to hard-fail on it, but the skill must know the spec axis has no
+    source, and the warning is what tells it "could not check" rather than "no
+    plan exists".
+    """
+    code, out, err = run_helper("sapa-tmp", "--start", cwd)
+    if code != 0 or not out.strip():
+        raise ConfigError(f"could not resolve a scratch directory: {err or 'sapa tmp failed'}")
+    path = os.path.join(out.strip(), "plan.md")
+
+    code, out, err = run_helper("sapa-issue", "plan-comment", "--read", "--start", cwd)
+    if code == 3:
+        return path, False
+    if code != 0:
+        sys.stderr.write(f"sapa gate: could not read the plan comment "
+                         f"({err or 'sapa issue failed'})\n")
+        return path, False
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(out)
+    except OSError as exc:
+        sys.stderr.write(f"sapa gate: could not write {path} ({exc})\n")
+        return path, False
+    return path, True
+
+
+def run_step(step: dict, cwd: str, base: str, changed: str) -> int:
+    """Run one `run:` step under the env contract, emit its result line, return its exit."""
+    env = dict(os.environ)
+    env["SAPA_BASE"] = base
+    env["SAPA_CHANGED_FILES"] = changed
+    sys.stdout.flush()  # keep our lines ordered against the step's own output
+    started = time.monotonic()
+    try:
+        code = subprocess.run(step["target"], shell=True, cwd=cwd, env=env).returncode
+    except OSError as exc:
+        sys.stderr.write(f"sapa gate: could not run step {step['name']!r} ({exc})\n")
+        code = 127
+    emit("step", step["name"], "run", code, f"{time.monotonic() - started:.1f}")
+    return code
+
+
+def gate(start: str, after: str | None, list_only: bool) -> int:
+    config_path = find_config(start)
+    cfg = load_config(config_path)
+    steps = resolve_steps(cfg, config_path)
+
+    if list_only:
+        for step in steps:
+            emit("list", step["name"], step["kind"], step["target"], step["model"] or "-")
+        return EXIT_OK
+
+    # Steps run where the config lives: the project root by construction, so a
+    # relative `run:` path means the same thing however the gate was invoked.
+    root = os.path.dirname(config_path)
+    base = str(cfg.get("base") or "main")
+    remote = str(cfg.get("remote") or "origin")
+    todo = remaining_steps(steps, after)
+
+    if any(s["kind"] == "skill" for s in todo):
+        path, present = materialize_plan(root)
+        emit("plan", path, "present" if present else "absent")
+
+    changed = None  # computed on the first `run:` step, so a skill-only walk skips git
+    for step in todo:
+        if step["kind"] == "skill":
+            emit("needs-skill", step["name"], step["target"], step["model"] or "-")
+            return EXIT_NEEDS_SKILL
+        if changed is None:
+            changed = changed_files(remote, base, root)
+        if run_step(step, root, base, changed) != 0:
+            return EXIT_STEP_FAILED
+
+    emit("done", "green")
+    return EXIT_OK
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="sapa gate",
+        add_help=True,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--after", metavar="NAME",
+                        help="resume with the step after NAME (the skill step just handled)")
+    parser.add_argument("--list", action="store_true", dest="list_only",
+                        help="print the resolved steps and exit, running nothing")
+    parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd(),
+                        help="discover the config from this directory instead of $PWD")
+    args = parser.parse_args()
+
+    try:
+        return gate(os.path.abspath(args.start), args.after, args.list_only)
+    except ConfigError as exc:
+        sys.stderr.write(f"sapa gate: {exc}\n")
+        return EXIT_CONFIG
+
+
+if __name__ == "__main__":
+    sys.exit(main())

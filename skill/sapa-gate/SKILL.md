@@ -19,27 +19,27 @@ status --stage gate` (best-effort — it no-ops outside a sapa stream).
 
 ## Step 1 — Locate the config
 
-Run `sapa config -p` to print the discovered `.sapa.yaml` (it walks up from the
-current directory the way `sapa worktree` finds `.bare`). If none is found, ask
-whether to use a sensible default gate (test + format) or stop.
+Run `sapa gate --list` to print the resolved gate steps. `sapa gate` finds the
+`.sapa.yaml` itself (walking up the way `sapa worktree` finds `.bare`) and reads
+the keys it needs — `base:` (default `main`), `remote:` (default `origin`), and
+the ordered `gate:` list. `sapa config -p` shows the whole file if you want the
+other keys too.
 
-Read these top-level keys (all optional):
+Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
 
-- `base:` — the branch the PR targets (default `main`).
-- `remote:` — the single remote to fetch and rebase onto (default `origin`).
-- `gate:` — the ordered list of gate steps below.
-
-Each gate step has a `name` and either:
-
-- `run:` — a shell command, run verbatim in the working tree. It may carry a
+- a `run:` step is a shell command the helper runs verbatim. It may carry a
   version-manager prefix such as `fvm flutter test`.
-- `skill:` — a skill to invoke for that step (for example a review skill). Treat
-  its findings as the step result.
+- a `skill:` step is a skill you invoke for that step. Treat its findings as the
+  step result.
+- `model:` (`-` when absent) names a model, the way the Agent tool's model
+  override accepts (`fable`, `opus`, `sonnet`, `haiku`). It is meaningful for
+  `skill:` steps; Step 3 says how to honour it. Absent, the step runs on the
+  session model.
 
-A step may also carry `model:` — a model to run that step on, named the way the
-Agent tool's model override accepts (`fable`, `opus`, `sonnet`, `haiku`). It is
-meaningful for `skill:` steps; Step 3 says how to honour it. Absent, the step
-runs on the session model.
+Exit 2 means there is nothing to run: no config, no `gate:` key, or a malformed
+step. The message says which. On a missing config, ask whether to use a sensible
+default gate (test + format) or stop; on a malformed one, report it and stop
+rather than guessing what was meant.
 
 ## Step 2 — Rebase the branch up to date
 
@@ -71,70 +71,66 @@ the rebase stopped at that conflict, report the conflicting hunk as a finding, a
 escalate to the user. Resolve it their way, then `git rebase --continue`; do not
 certify green until the rebase completes cleanly.
 
-Once the rebase settles, the branch's changed files against the merge-base are
-`git diff --name-only <remote>/<base>...HEAD` — the diff the gate holds. Step 3
-hands this to each `run:` step so a script can scope to it.
+Once the rebase settles, the branch holds the diff the gate runs against. `sapa
+gate` computes it and hands it to each `run:` step, so a script can scope to it.
 
 ## Step 3 — Run the gate (blocking)
 
-Run each gate step in order, in the working tree. This blocks.
+Run `sapa gate`. It walks the configured steps in order in the working tree,
+runs each `run:` step with `SAPA_BASE` and `SAPA_CHANGED_FILES` set from the diff
+the rebase just settled, and stops the moment something needs you. This blocks.
 
-Give every `run:` step the diff as two environment variables, `SAPA_BASE` and
-`SAPA_CHANGED_FILES` (newline-separated paths), so a script can gate only the
-changed packages and fall back to all on a cross-cutting change. Set them on the
-command itself — each step runs as its own shell, so a variable exported in an
-earlier step would not survive; setting them inline keeps each step
-self-contained:
+It emits one tab-separated line per result, each led by `sapa-gate` so a step's
+own output can't be mistaken for one:
 
 ```
-SAPA_BASE=<base> \
-SAPA_CHANGED_FILES="$(git diff --name-only <remote>/<base>...HEAD)" \
-  <the run: command>
+sapa-gate	plan	<absolute-path>	present|absent
+sapa-gate	step	<name>	run	<exit>	<seconds>
+sapa-gate	needs-skill	<name>	<skill>	<model-or->
+sapa-gate	done	green
 ```
 
-Use `<base>` and `<remote>` from the config; the triple-dot diffs against the
-merge-base. Quote the substitution so the newline-separated paths survive. An
-empty result (the branch matches the base) is fine — the variables come through
-empty. This contract applies to `run:` steps only; a `skill:` step invokes a
-skill rather than a shell, so the variables do not apply to it.
+Act on the exit code:
 
-Every `skill:` step gets the accepted plan as its spec source, the way this gate
-already gives `run:` steps the diff. In the flow the plan is always recorded
-before the gate, so materialize it once — mirroring how `sapa-build` reads it:
+- **0 — `done green`.** Every step passed. Report the branch is green and stop;
+  `/sapa-submit` ships it next.
+- **4 — `needs-skill`.** The walk has reached a `skill:` step, which needs this
+  harness. Invoke it (below), and when it passes continue the walk with `sapa
+  gate --after <name>`. Repeat until the gate ends on 0 or 1. A skill step whose
+  findings are a genuine failure is treated like a failed step: stop and report.
+- **1 — the last `step` line names the failing step.** Its output is directly
+  above that line. Report it as a finding. Apply a safe, mechanical fix and
+  rerun `sapa gate` from the top; if it is a judgement call, ask. Do not certify
+  green until every step passes. The user may interrupt to change something and
+  rerun `/sapa-gate`.
+- **2 — nothing to run.** Back to Step 1: the config is missing or malformed.
 
-```
-sapa issue plan-comment --read > "$(sapa tmp)/plan.md"
-```
+### Invoking a `skill:` step
 
-Exit 0 means the plan is present at that path; exit 3 means no plan comment is
-recorded — an anomaly in the flow, handled below. The redirect still leaves an
-empty `plan.md` behind on exit 3, so decide plan-present by the exit status, not
-by the file existing. Whichever invocation path a `skill:` step takes, its prompt
-must tell the skill the accepted spec for this change is at that path — resolved
-to an absolute path, so a sub-agent reading it need not re-expand `$(sapa tmp)`
-itself — and to use it as the spec source rather than discovering one itself, and
-pass the path as the skill's argument too for skills that read args. This keeps the contract skill-agnostic: any review skill that accepts a
-spec path then reviews against the plan, not against a guessed surface such as
-the untouched issue body. If exit 3 — no plan comment — say so in the step prompt
-so the skill reports its spec axis honestly rather than degrading to "no spec
-available" silently, and surface a visible warning in the gate report that
-spec-compliance did not run: a green gate must never imply the spec was checked
-when it was not. Do not hard-fail the step on a missing plan; `/sapa-gate` is
-legitimately runnable standalone before a plan is recorded.
+The `plan` line is the spec source for every `skill:` step: `sapa gate`
+materializes the accepted plan once and prints its absolute path. Whichever
+invocation path the step takes, its prompt must name that path as the accepted
+spec for this change and say to review against it rather than discovering a
+surface itself, and pass the path as the skill's argument too for skills that
+read args. That keeps the contract skill-agnostic: any review skill that accepts
+a spec path reviews against the plan, not against a guessed surface such as the
+untouched issue body.
 
-When a `skill:` step names a `model:`, run that step inside a single sub-agent
-pinned to that model via the Agent tool's model override. The sub-agent's
-prompt: invoke that skill against the diff `<remote>/<base>...HEAD`, using the
-materialized plan file (its resolved absolute path) as the spec source, and
-return its findings verbatim. Treat the sub-agent's findings as the step result, exactly as an
-in-session skill invocation would be. Sub-agents the skill itself spawns inherit
-the pinned model, so a review skill's parallel reviewers run on it too. Without
-`model:`, invoke the skill in-session with the same spec path — today's
-behaviour, extended only to carry the plan.
+`absent` means there is no plan to review against: either none is recorded —
+legitimate when `/sapa-gate` runs standalone before planning, an anomaly inside
+the flow — or the read itself failed, which the helper says on stderr. Check
+stderr and report which, because "no plan exists" and "could not check" call for
+different follow-up. Either way, say so in the step prompt so the skill reports
+its spec axis honestly rather than degrading to "no spec available" silently, and
+warn visibly in the gate report that spec-compliance did not run. A green gate
+must never imply the spec was checked when it was not. It is never a reason to
+fail the step.
 
-- All steps pass → report the branch is green and stop. `/sapa-submit` ships it
-  next.
-- A step fails → **stop**. Report the failing step and its output as a finding.
-  Apply a safe, mechanical fix and rerun from the top; if it is a judgement call,
-  ask. Do not certify green until every step passes. The user may interrupt to
-  change something and rerun `/sapa-gate`.
+When the `needs-skill` line carries a model (anything but `-`), run that step
+inside a single sub-agent pinned to that model via the Agent tool's model
+override. The sub-agent's prompt: invoke that skill against the diff
+`<remote>/<base>...HEAD`, using the materialized plan file as the spec source,
+and return its findings verbatim. Treat the sub-agent's findings as the step
+result, exactly as an in-session invocation would be. Sub-agents the skill itself
+spawns inherit the pinned model, so a review skill's parallel reviewers run on it
+too. With `-`, invoke the skill in-session with the same spec path.

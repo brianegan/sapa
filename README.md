@@ -53,6 +53,11 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   without clobbering text a human has edited or locked.
 - `sapa status` — record the current stream's run-state and lifecycle stage to a
   per-stream JSON file a window switcher can read (see [Window status](#window-status)).
+- `sapa gate` — walk the configured `gate:` steps in order, run each `run:` step
+  with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
+  the `skill:` steps, and emit one structured line per result. It stops when it
+  reaches a `skill:` step (exit 4), because invoking a skill needs the agent; the
+  `sapa-gate` skill invokes it and resumes with `sapa gate --after <name>`.
 - `sapa watch` — poll the current branch's PR and emit one structured line per
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`), guarding empty or failed fetches and deduping against the
@@ -63,6 +68,12 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
 Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
 
 ## Install
+
+Needs `git`, `gh` (authenticated), `python3`, and PyYAML. Everything but PyYAML
+you already have if you use GitHub from a terminal on macOS; PyYAML ships with
+Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Only
+`sapa gate` needs it, to read the `gate:` step list. Jira projects also need
+`acli`.
 
 Clone the repo, then run the installer from it:
 

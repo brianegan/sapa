@@ -20,6 +20,7 @@
 #   tmp         print a per-stream scratch directory for the phase skills
 #   section     maintain a machine-managed section of a PR body
 #   status      record the current stream's status for the window switcher
+#   gate        run the configured gate steps and emit one line per result
 #   watch       poll the current branch's PR and emit one line per change
 #   teardown    remove a merged stream's worktree and local branch
 #   install     link sapa onto PATH and its skills into your agents
@@ -28,7 +29,7 @@
 
 set -euo pipefail
 
-commands="bootstrap worktree start issue config tmp section status watch teardown install uninstall completion"
+commands="bootstrap worktree start issue config tmp section status gate watch teardown install uninstall completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 
