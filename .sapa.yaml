@@ -3,6 +3,10 @@ base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
 plan: grilling
+# A skill to shape the implementation, invoked once before the first task. Left
+# off here so sapa's own streams build as `/sapa-build` describes; turning it on
+# changes how every later stream is built, so it stays a deliberate flip:
+#   build: tdd
 # Shape the free prose sapa writes (plan comment, PR body, review replies) with a
 # skill, run as a final pass before recording. Omit to write plainly.
 writing_style: humanizer

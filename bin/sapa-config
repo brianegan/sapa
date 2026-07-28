@@ -71,6 +71,11 @@ write_template() {
 # Omit to discuss the plan inline.
 # plan: grilling
 
+# A skill to shape the implementation in `sapa build` (e.g. tdd), invoked once
+# before the first task. It shapes how each task reaches green; sapa still owns
+# the task list and its `Done when:` checks. Omit to build as sapa describes.
+# build: tdd
+
 # A skill to style the free prose sapa writes (plan comment, PR body, review
 # replies), run as a final pass before recording. Omit to write plainly.
 # writing_style: humanizer

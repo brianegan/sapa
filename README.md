@@ -151,6 +151,12 @@ the flow, each with a backward-compatible default:
 - `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grilling`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
+- `build:` — a skill `/sapa-build` invokes to shape the implementation (for
+  example `/tdd` to build test-first). It is invoked once, before the first task,
+  because a skill's instructions stay loaded for the rest of the session. Omit it
+  to build as `/sapa-build` describes. The skill shapes how each task reaches
+  green, never whether it does: it can tighten sapa's rule and cannot loosen it,
+  and it never re-scopes, merges, or reorders the recorded tasks.
 - `writing_style:` — a skill sapa runs as a final pass over the free prose it
   writes: the plan comment, the PR body, and its replies to review comments (for
   example `/humanizer`). Omit it (the default) to write plainly. It shapes prose
@@ -213,6 +219,7 @@ base: main
 remote: origin
 pr: draft
 plan: grilling
+build: tdd
 writing_style: humanizer
 gate:
   max_fix_attempts: 3

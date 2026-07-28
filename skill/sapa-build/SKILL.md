@@ -37,7 +37,26 @@ build` (best-effort — it no-ops outside a sapa stream and never needs your inp
    `## Tasks` section, stop and say so: the plan predates the task format or came
    from elsewhere, and it needs re-recording with `/sapa-plan` before build. Do not
    fall back to a single-pass build — the task list is the build contract.
-3. **Implement one task at a time.** A recorded plan is an accepted plan, so build
+3. **Load the configured build skill.** Run `sapa config -p` and look for a
+   `build:` key. If it names a skill, invoke it now — before task 1, so its
+   guidance shapes every task that follows (for example `/tdd` to build
+   test-first). Invoke it the normal way; if it cannot be model-invoked, read its
+   `SKILL.md` and apply its guidance by hand. If there is no config or no `build:`
+   key, implement the tasks as step 4 describes and nothing here applies.
+
+   Invoke it once, here, and not again per task: a skill's instructions stay in
+   the session once loaded, so a single invocation already covers the whole build.
+   It loads after steps 1 and 2 because both of those stop the build outright, and
+   there is no sense loading a build skill for a build that will not happen.
+
+   A build skill shapes *how* each task reaches green; it never decides *whether*
+   one does. It can tighten sapa's rule — `/tdd` demanding a failing test before
+   any implementation is stronger than step 4's "write the test and reach green",
+   and that is the point of configuring it — but it cannot loosen it. No skill's
+   guidance excuses starting the next task with the current one unverified, and
+   none re-scopes, merges, or reorders the recorded tasks, because the plan comment
+   is the accepted plan.
+4. **Implement one task at a time.** A recorded plan is an accepted plan, so build
    what the comment says — but work through the tasks in order, not all at once.
    For each task: implement what it calls for in this working tree, then verify it
    against its `Done when:` criterion before starting the next. Verifying means a

@@ -91,7 +91,7 @@ else
 fi
 
 # Task 2: every documented option appears as a commented entry.
-for key in base pr tracker plan writing_style watch gate; do
+for key in base pr tracker plan build writing_style watch gate; do
   present=no
   grep -qE "^# ?${key}:" "$fresh/.sapa.yaml" && present=yes
   check "init documents $key" "yes" "$present"
