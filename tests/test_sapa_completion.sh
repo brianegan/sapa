@@ -148,7 +148,10 @@ PROBE
   blankline="$(printf '%s\n' "$tdout" | grep '^blank ')"
   dashline="$(printf '%s\n' "$tdout" | grep '^dash ')"
   if grep -q 'files=\[-/\]' <<<"$blankline"; then ok "teardown blank word calls _files -/ directly"; else bad "teardown blank word calls _files -/ directly ($blankline)"; fi
-  if grep -q 'args=\[.*--force' <<<"$dashline"; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
+  # Anchor both spellings to the description that follows them. `--force` also
+  # appears inside the `(-f --force)` exclusion group, so an unanchored grep for
+  # it would still pass with the `--force` option spec deleted.
+  if grep -q 'args=\[.*--force\[remove' <<<"$dashline"; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
   # Both spellings are offered, so `-<TAB>` cycles through -f as well as --force.
   if grep -q 'args=\[.*-f\[remove' <<<"$dashline"; then ok "teardown dash word offers -f shorthand"; else bad "teardown dash word offers -f shorthand ($dashline)"; fi
 else
