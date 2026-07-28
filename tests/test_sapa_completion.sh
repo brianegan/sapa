@@ -149,6 +149,8 @@ PROBE
   dashline="$(printf '%s\n' "$tdout" | grep '^dash ')"
   if grep -q 'files=\[-/\]' <<<"$blankline"; then ok "teardown blank word calls _files -/ directly"; else bad "teardown blank word calls _files -/ directly ($blankline)"; fi
   if grep -q 'args=\[.*--force' <<<"$dashline"; then ok "teardown dash word reaches --force options"; else bad "teardown dash word reaches --force options ($dashline)"; fi
+  # Both spellings are offered, so `-<TAB>` cycles through -f as well as --force.
+  if grep -q 'args=\[.*-f\[remove' <<<"$dashline"; then ok "teardown dash word offers -f shorthand"; else bad "teardown dash word offers -f shorthand ($dashline)"; fi
 else
   echo "skip zsh -n / parse checks (zsh not installed)"
 fi
