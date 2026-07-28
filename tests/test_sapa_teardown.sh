@@ -49,10 +49,18 @@ git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
 printf 'wip\n' > "$proj/dirty/scratch.txt"
 out="$(bash "$TEARDOWN" "$proj/dirty" 2>&1)"; rc=$?
 if [ $rc -eq 3 ] && [ -d "$proj/dirty" ]; then ok "refuses dirty worktree"; else bad "refuses dirty worktree (rc=$rc, $out)"; fi
+# The refusal names both spellings of the escape hatch.
+if grep -q -- "-f/--force" <<<"$out"; then ok "refusal hint names -f and --force"; else bad "refusal hint names -f and --force ($out)"; fi
 
 # --- --force removes a dirty worktree ---
 out="$(bash "$TEARDOWN" --force "$proj/dirty" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/dirty" ]; then ok "force removes dirty worktree"; else bad "force removes dirty worktree ($out)"; fi
+
+# --- -f is a shorthand for --force ---
+git -C "$proj/main" worktree add -q "$proj/dirty-short" -b dirty-short
+printf 'wip\n' > "$proj/dirty-short/scratch.txt"
+out="$(bash "$TEARDOWN" -f "$proj/dirty-short" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/dirty-short" ]; then ok "-f removes dirty worktree"; else bad "-f removes dirty worktree (rc=$rc, $out)"; fi
 
 # --- works when invoked from inside the target worktree ---
 git -C "$proj/main" worktree add -q "$proj/inside" -b inside

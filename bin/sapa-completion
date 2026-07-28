@@ -124,7 +124,7 @@ $pairs
       # eats a lone positional spec and the real current word gets nothing.
       # \`_files\` completes the current word in place, sidestepping that offset.
       if [[ \${words[CURRENT]} == -* ]]; then
-        _arguments '--force[remove even with uncommitted changes]'
+        _arguments '(-f --force)'{-f,--force}'[remove even with uncommitted changes]'
       else
         _files -/
       fi
