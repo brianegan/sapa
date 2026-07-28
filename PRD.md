@@ -180,13 +180,19 @@ me through my existing notification hook, which opens the right window on click.
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
   `draft`), `plan:` names a skill `/sapa-plan` delegates the planning
-  discussion to, `writing_style:` names a skill sapa runs as a final pass over
+  discussion to, `build:` names a skill `/sapa-build` invokes once before its
+  first task to shape the implementation (for example `/tdd`),
+  `writing_style:` names a skill sapa runs as a final pass over
   the free prose it writes (the plan comment, PR body, and review replies),
   shaping prose only and leaving the structured parts — task lists and their
   `Done when:` lines, the PR title, the gate record — as written, and `tracker:`
   (`github` default, or `jira`) with an optional
   `jira:` map (`site:` for the PR's issue link, `project:` to expand a bare
-  `sapa start 1` to `GP-1`) selects the issue backend. Config is mostly
+  `sapa start 1` to `GP-1`) selects the issue backend. A configured `build:` skill
+  shapes how each task reaches green and never whether it does: it may tighten
+  sapa's rule but not loosen it, and never re-scopes the recorded tasks, the same
+  division of labour that lets `plan:` own the planning discussion while the
+  record-to-issue step always runs. Config is mostly
   agent-interpreted — `sapa config` walks up and prints the file, and the skills
   read the keys they need the way they already read `base`. Two helpers read it
   themselves: `sapa start` greps the printed config for `tracker`/`project` to
