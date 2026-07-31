@@ -14,8 +14,9 @@ to date" surprise at merge time. Does not push or open a PR — that is
 Rules (always): the configured remote (default `origin`) is the only remote;
 GitHub goes through `gh`.
 
-Before anything else, mark the stream's stage for the window switcher: run `sapa
-status --stage gate` (best-effort — it no-ops outside a sapa stream).
+Before anything else, record the stream's stage: run `sapa status --stage gate`
+(best-effort — it no-ops outside a sapa stream). It is how `/sapa-flow` resumes a
+stream at the phase it left off in.
 
 ## Step 1 — Locate the config
 
@@ -107,8 +108,10 @@ the one thing it needs from you is the outcome of each `skill:` step, below.
 
 Act on the exit code:
 
-- **0 — `done green`.** Every step passed. Report the branch is green and stop;
-  `/sapa-submit` ships it next.
+- **0 — `done green`.** Every step passed. Report the branch is green; the gate is
+  done and `/sapa-submit` ships it next. A green gate is a result to hand back, not
+  a decision to put to the developer, so under `/sapa-flow` submit follows on its
+  own.
 - **4 — `needs-skill`.** The walk has reached a `skill:` step, which needs this
   harness. Invoke it (below), and when it passes continue the walk with `sapa gate
   --after <name> --result pass --summary "<one line on what it found>"`. Repeat

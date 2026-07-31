@@ -17,8 +17,9 @@ issue body.
 
 ## Steps
 
-First, mark the stream's stage for the window switcher: run `sapa status --stage
-build` (best-effort — it no-ops outside a sapa stream and never needs your input).
+First, record the stream's stage: run `sapa status --stage build` (best-effort —
+it no-ops outside a sapa stream and never needs your input). It is how
+`/sapa-flow` resumes a stream at the phase it left off in.
 
 1. **Read the recorded plan.** `sapa issue plan-comment --read` finds sapa's plan
    comment on this stream's issue (GitHub or Jira) and prints its body:
@@ -66,5 +67,13 @@ build` (best-effort — it no-ops outside a sapa stream and never needs your inp
    something breaks after several tasks the failure localizes to the task just
    finished rather than the whole branch. This stays a single-session build: no
    subagents, no per-task dispatch — just the cadence of reaching green on each
-   task before moving to the next. When every task is verified, stop; `/sapa-gate`
-   runs the checks next.
+   task before moving to the next.
+
+   Crossing from one task to the next is automatic. The boundaries above say where
+   a task ends, not that anything happens there: a verified task is followed
+   immediately by the next one, without reporting back and waiting, and without
+   asking the developer whether to carry on. Their answer is already in the plan
+   comment, which is an accepted plan. Only an escalation stops a build partway —
+   a task you cannot reach green, or work the plan does not cover — and that is a
+   real block to raise, not a checkpoint to pause at. When every task is verified,
+   stop; `/sapa-gate` runs the checks next.

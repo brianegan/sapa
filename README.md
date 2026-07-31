@@ -52,7 +52,9 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
 - `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
 - `sapa status` — record the current stream's run-state and lifecycle stage to a
-  per-stream JSON file a window switcher can read (see [Window status](#window-status)).
+  per-stream JSON file, and read the stage back with `--report`. A window switcher
+  reads the file to badge each window (see [Window status](#window-status));
+  `sapa-flow` reads the stage to resume a stream at the phase it left off in.
 - `sapa gate` — walk the configured `gate.steps:` in order, run each `run:` step
   with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
   the `skill:` steps, and emit one structured line per result. It stops when it

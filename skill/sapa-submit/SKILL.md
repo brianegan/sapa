@@ -15,8 +15,9 @@ GitHub goes through `gh`, Jira through `acli`; the PR always lives on GitHub. Th
 PR body is managed with `sapa section` and never clobbers human text; the issue
 plan is recorded with `sapa issue plan-comment` (which is not edit-locked).
 
-Before anything else, mark the stream's stage for the window switcher: run `sapa
-status --stage submit` (best-effort — it no-ops outside a sapa stream).
+Before anything else, record the stream's stage: run `sapa status --stage submit`
+(best-effort — it no-ops outside a sapa stream). It is how `/sapa-flow` resumes a
+stream at the phase it left off in.
 
 ## Step 1 — Locate the config
 
@@ -152,5 +153,7 @@ Carry any plan divergence noted in Step 3 into this summary. Carry the gate reco
 too when it is not clean: if `sapa gate --report` found no record, or reported a
 gated commit that is not the current head, say so here in one line. The PR already
 says it, and the developer should not have to read their own PR body to find out
-the branch went up on the strength of a gate that did not run on it. Then stop.
-`/sapa-watch` monitors the PR from here.
+the branch went up on the strength of a gate that did not run on it. That
+completes the submit phase, and `/sapa-watch` monitors the PR from here. Under
+`/sapa-flow`, go straight on to it: an open PR is the hand-off to watch, not a
+place to ask whether to keep going.

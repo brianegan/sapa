@@ -98,6 +98,35 @@ with tempfile.TemporaryDirectory() as d:
     else:
         bad("--stage clobbered state: %r" % e)
 
+    # --- --report prints the recorded stage, bare, and writes nothing ---
+    before = read_entry(status_dir, branch)
+    r = run(["--report"], wt, status_dir)
+    if r.returncode == 0 and r.stdout == "watch\n":
+        ok("--report prints the recorded stage alone")
+    else:
+        bad("--report output wrong (rc=%d): %r" % (r.returncode, r.stdout))
+    if read_entry(status_dir, branch) == before:
+        ok("--report leaves the file untouched")
+    else:
+        bad("--report wrote to the file: %r" % read_entry(status_dir, branch))
+
+    # --- a stream with a file but no stage yet reports nothing, not an error ---
+    _, swt, sbranch = make_stream(os.path.join(d, "s2"), branch="7-state-only")
+    run(["--state", "busy"], swt, status_dir)
+    r = run(["--report"], swt, status_dir)
+    if r.returncode == 0 and r.stdout == "":
+        ok("--report prints nothing when no stage is recorded")
+    else:
+        bad("--report on a stageless file (rc=%d): %r" % (r.returncode, r.stdout))
+
+    # --- and with no file at all: same answer, so a fresh stream starts at the top ---
+    _, fwt, _ = make_stream(os.path.join(d, "s3"), branch="8-never-written")
+    r = run(["--report"], fwt, status_dir)
+    if r.returncode == 0 and r.stdout == "":
+        ok("--report prints nothing when the stream has no file")
+    else:
+        bad("--report on a missing file (rc=%d): %r" % (r.returncode, r.stdout))
+
     # --- --clear removes the file ---
     r = run(["--clear"], wt, status_dir)
     if r.returncode == 0 and not os.path.exists(entry_path):

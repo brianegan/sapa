@@ -1,6 +1,6 @@
 ---
 name: sapa-plan
-description: Read a stream's issue (GitHub or Jira), agree a plan, and record it on the issue as a durable comment, then stop. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". For the whole flow (plan, build, gate, submit, watch) use /sapa-flow.
+description: Read a stream's issue (GitHub or Jira), agree a plan, and record it on the issue as a durable comment. Use at the start of a stream, or when the user says "plan this", "sapa plan", or "/sapa-plan". `/sapa-build` implements the recorded plan next.
 ---
 
 # sapa-plan
@@ -19,8 +19,9 @@ and overwrites it; it is not edit-locked, so it always reflects the latest plan.
 
 ## Steps
 
-First, mark the stream's stage for the window switcher: run `sapa status --stage
-plan` (best-effort — it no-ops outside a sapa stream and never needs your input).
+First, record the stream's stage: run `sapa status --stage plan` (best-effort —
+it no-ops outside a sapa stream and never needs your input). It is how
+`/sapa-flow` resumes a stream at the phase it left off in.
 
 1. **Find the issue.** `sapa issue key` prints the identity for this branch — a
    GitHub number (`42`) or a Jira key (`GP-1`). Use the value the user gave if they
@@ -153,8 +154,9 @@ plan` (best-effort — it no-ops outside a sapa stream and never needs your inpu
 
    The helper prints `created` or `updated` on stderr and injects the identity
    marker itself, so you do not add one. It never touches the issue body. Report
-   where the plan landed and stop.
+   where the plan landed; that completes the plan phase.
 
 Once the plan comment is recorded, this skill is done: the plan is captured and
-durable. Building it is `/sapa-build`, and `/sapa-flow` runs the whole sequence
-(plan, build, gate, submit, watch) when the developer wants it all in one.
+durable. `/sapa-build` implements it next. Running inside `/sapa-flow`, that step
+follows on its own, so return to the flow rather than offering the developer a
+choice about whether to take it.
