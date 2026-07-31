@@ -243,7 +243,7 @@ me through my existing notification hook, which opens the right window on click.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
   single invocation carries a stream from its issue through plan, build, gate,
   PR, and watch by invoking each phase skill in turn, with no second command. It
-  implements none of the phases itself, and stops wherever a phase stops. What it
+  implements none of the phases itself, and stops wherever a phase escalates. What it
   does own is the crossing between phases, and that crossing is automatic: a phase
   returning is not the flow ending, so the flow continues to the next phase without
   asking the developer for permission, and only an escalation stops it. The same

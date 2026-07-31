@@ -205,6 +205,12 @@ def main(argv: list[str]) -> int:
         p.error("nothing to do: pass --state, --notification, --active, --stage, "
                 "--report, or --clear")
 
+    # --report reads and returns before any write path, so pairing it with one
+    # would silently drop that write. Refuse instead of picking a winner.
+    if args.report and (args.state or args.notification or args.active
+                        or args.stage or args.clear):
+        p.error("--report only reads: run it on its own, not with a write flag")
+
     # Read stdin before resolving the stream so a manual invocation on a tty is
     # guarded the same way regardless of location; harmless when unused.
     message = notification_message() if args.notification else ""

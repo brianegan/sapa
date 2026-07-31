@@ -127,6 +127,13 @@ with tempfile.TemporaryDirectory() as d:
     else:
         bad("--report on a missing file (rc=%d): %r" % (r.returncode, r.stdout))
 
+    # --- --report refuses to be paired with a write it would silently drop ---
+    r = run(["--report", "--stage", "build"], wt, status_dir)
+    if r.returncode != 0 and read_entry(status_dir, branch).get("stage") == "watch":
+        ok("--report with a write flag is a usage error and writes nothing")
+    else:
+        bad("--report + --stage was not refused (rc=%d)" % r.returncode)
+
     # --- --clear removes the file ---
     r = run(["--clear"], wt, status_dir)
     if r.returncode == 0 and not os.path.exists(entry_path):
