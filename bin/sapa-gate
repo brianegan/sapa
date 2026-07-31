@@ -12,9 +12,14 @@ the gate is the phase nothing downstream re-verifies — `sapa-submit` ships on 
 word — so its step execution belongs in one tested place rather than being
 re-derived from prose every session.
 
-Steps run in the directory holding the discovered `.sapa.yaml`, which is the
-project root by construction, so a `run:` command's relative paths mean the same
-thing wherever the gate was invoked from.
+The gate resolves the worktree holding the caller before anything else, and
+everything hangs off that one anchor: the config walk-up starts there, and so do
+the scratch directory, the stream's issue, the diff against the base, and each
+`run:` step's cwd. So a `run:` command's relative paths mean the same thing
+wherever inside the tree the gate was invoked from, and a `.sapa.yaml` sitting
+above several worktrees covers all of them rather than pulling every step into
+the directory it happens to sit in. A caller outside a work tree is refused, not
+fallen back on.
 
 Output (one structured line per result, tab-separated, always led by `sapa-gate`
 so a step's own output streaming through the same stdout can't be mistaken for
@@ -118,10 +123,11 @@ Exit codes:
     0  every remaining step passed (or `--list`/`--report` printed and exited)
     1  a step failed — a `run:` step's own exit, or a `skill:` step the agent
        resumed with `--result fail`. The walk stops there either way.
-    2  a config or usage error — no config, no `gate:` map, no `gate.steps:`, a
-       malformed step or budget, an unknown `--after` name, `--result` without
-       `--after` or against a `run:` step, `--fix-attempt` with `--after`, or
-       PyYAML missing
+    2  a config or usage error — a caller outside a git worktree, no config, no
+       `gate:` map, no `gate.steps:`, a malformed step or budget, an unknown
+       `--after` name, `--result` without `--after` or against a `run:` step,
+       `--fix-attempt` with `--after`, or PyYAML missing. `--report` needs the
+       worktree and nothing else, so that first case is the only one it raises
     4  stopped at a `skill:` step awaiting dispatch
     5  the autofix budget is spent, so a `--fix-attempt` ran nothing
 
@@ -133,10 +139,13 @@ Usage:
       --summary TEXT           #   one line on what it found
     sapa gate --list           # print the resolved steps, run nothing
     sapa gate --report         # print the `## Gates` section, run nothing
-    sapa gate --start DIR      # discover the config from DIR instead of $PWD
+    sapa gate --start DIR      # resolve the worktree from DIR instead of $PWD
 
-The config is located by `sapa config`, so discovery is the same walk-up every
-other command does. `git` and `gh` are assumed installed, as everywhere else in
+The config is located by `sapa config`, walking up from the worktree root, so
+discovery is the same walk-up every other command does — seeded at the tree being
+gated rather than at the caller's cwd, so the config that supplies the steps and
+the directory they run in can never come apart.
+`git` and `gh` are assumed installed, as everywhere else in
 sapa; PyYAML is needed here because a nested list of step maps is past what the
 grep-the-printed-config reads elsewhere in sapa can do honestly.
 """
@@ -233,6 +242,37 @@ def find_config(start: str) -> str:
     if code != 0 or not path:
         raise ConfigError(err or f"no .sapa.yaml found in any parent of {start}")
     return path
+
+
+def worktree_root(start: str) -> str:
+    """The git worktree holding `start`. Everything the gate touches hangs off it.
+
+    One anchor, resolved before anything else: the config walk-up starts here, and
+    so do the scratch directory, the stream's issue, the diff against the base, and
+    each `run:` step's cwd. Anchoring on the config's directory instead is what #117
+    reported. In the `.bare` layout the config sits above the worktrees, beside a
+    `.bare` directory and nothing else, so every `run:` step executed against no
+    project and the branch read as the bare repo's HEAD rather than the worktree's.
+
+    A caller not inside a work tree is refused rather than fallen back on. The one
+    place that happens in practice is that same container directory, where falling
+    back to the caller would reproduce the exact failure this anchor exists to
+    prevent, and would do it while reporting a green gate.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=start, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as exc:
+        raise ConfigError(f"could not run git to find the worktree holding {start} ({exc})")
+    root = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not root:
+        raise ConfigError(
+            f"{start} is not inside a git worktree, so there is no tree to gate. Run "
+            f"the gate from the worktree you want checked; in a `.bare` layout that is "
+            f"one of the branch directories, not the directory holding `.bare`")
+    return root
 
 
 def load_config(path: str) -> dict:
@@ -789,7 +829,7 @@ def report(start: str) -> int:
     honest answer there is a section saying so rather than a failure the caller has
     to interpret or, worse, a list rebuilt from the config naming steps nobody ran.
     """
-    root = os.path.dirname(find_config(start))
+    root = worktree_root(start)
     rec_path = os.path.join(scratch_dir(root), RECORD_NAME)
     sys.stdout.write(render_record(load_record(rec_path), git_sha("HEAD", root)))
     return EXIT_OK
@@ -798,7 +838,12 @@ def report(start: str) -> int:
 def gate(start: str, after: str | None, list_only: bool,
          result: str | None = None, summary: str | None = None,
          fix_attempt: bool = False) -> int:
-    config_path = find_config(start)
+    # The tree being gated, resolved before the config so the walk-up starts from
+    # it. Seeding discovery from the caller's cwd instead would let the two
+    # disagree: a `.sapa.yaml` in a subdirectory would supply the step list while
+    # the steps themselves ran at the worktree root.
+    root = worktree_root(start)
+    config_path = find_config(root)
     cfg = load_config(config_path)
     gate_cfg = gate_map(cfg, config_path)
     steps = resolve_steps(gate_cfg, config_path)
@@ -811,9 +856,6 @@ def gate(start: str, after: str | None, list_only: bool,
             emit("list", step["name"], step["kind"], step["target"], step["model"] or "-")
         return EXIT_OK
 
-    # Steps run where the config lives: the project root by construction, so a
-    # relative `run:` path means the same thing however the gate was invoked.
-    root = os.path.dirname(config_path)
     base = str(cfg.get("base") or "main")
     remote = str(cfg.get("remote") or "origin")
     scratch = scratch_dir(root)
@@ -935,7 +977,7 @@ def main() -> int:
                         help="print the `## Gates` section for the recorded run, "
                              "running nothing")
     parser.add_argument("--start", default=os.environ.get("PWD") or os.getcwd(),
-                        help="discover the config from this directory instead of $PWD")
+                        help="resolve the worktree from this directory instead of $PWD")
     args = parser.parse_args()
 
     try:
