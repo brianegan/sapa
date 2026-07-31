@@ -200,15 +200,15 @@ def main(argv: list[str]) -> int:
     p.add_argument("--start", default=os.environ.get("PWD") or os.getcwd())
     args = p.parse_args(argv)
 
-    if not (args.state or args.notification or args.active or args.stage
-            or args.report or args.clear):
+    writes = (args.state or args.notification or args.active or args.stage
+              or args.clear)
+    if not (writes or args.report):
         p.error("nothing to do: pass --state, --notification, --active, --stage, "
                 "--report, or --clear")
 
     # --report reads and returns before any write path, so pairing it with one
     # would silently drop that write. Refuse instead of picking a winner.
-    if args.report and (args.state or args.notification or args.active
-                        or args.stage or args.clear):
+    if args.report and writes:
         p.error("--report only reads: run it on its own, not with a write flag")
 
     # Read stdin before resolving the stream so a manual invocation on a tty is

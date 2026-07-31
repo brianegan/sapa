@@ -1,15 +1,17 @@
 ---
 name: sapa-flow
-description: Run a stream end to end from its GitHub issue — plan, build, gate, submit, and watch — by invoking each phase skill in turn. Use at the start of a stream, or when the user says "flow this", "sapa flow", "/sapa-flow", or "take this issue to a PR".
+description: Carry a stream forward from wherever it stands — plan, build, gate, submit, and watch — by invoking each phase skill in turn, resuming at the phase it left off in. Use at the start of a stream or to pick one back up, or when the user says "flow this", "sapa flow", "/sapa-flow", or "take this issue to a PR".
 ---
 
 # sapa-flow
 
 Drive one stream from its issue all the way to a merged PR by invoking the five
-phase skills in order. This skill holds no logic of its own — each phase lives in
-its own skill and can be run alone. `sapa-flow` is just the fused default that
-chains them, so a single command carries a stream from issue through plan, build,
-PR, and watch with no second command from the developer.
+phase skills in order. This skill implements none of the phases itself — each
+lives in its own skill and can be run alone. What it does own is the movement
+between them: where a stream picks up, when to cross from one phase to the next,
+and how a developer interruption resumes. So a single command carries a stream
+from issue through plan, build, PR, and watch with no second command from the
+developer.
 
 ## Steps
 

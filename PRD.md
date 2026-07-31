@@ -435,9 +435,10 @@ me through my existing notification hook, which opens the right window on click.
   this stream picks up", not "the last phase that happened to run", and a caller
   that changes the answer writes the stage it wants resumed rather than leaving a
   stale one to be second-guessed at read time. That is why `sapa-flow` rewrites it
-  to `gate` after an interruption that changed the working tree: re-entry stays
-  encoded in one place, and a stream interrupted after a green gate cannot resume
-  at submit and push un-gated work. The read prints a bare value rather than JSON,
+  to `gate` after an interruption that changed the working tree, or to `plan` when
+  the interruption changed what the work should be: re-entry stays encoded in one
+  place, and a stream interrupted after a green gate cannot resume at submit and
+  push un-gated work. The read prints a bare value rather than JSON,
   as `sapa issue key` and `sapa tmp` do, so no skill parses JSON in shell; an
   unrecorded stage prints nothing and still exits 0, which the caller reads as
   "begin at the first phase". `PreToolUse` clears a stale
