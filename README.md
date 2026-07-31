@@ -52,7 +52,9 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
 - `sapa section` — maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
 - `sapa status` — record the current stream's run-state and lifecycle stage to a
-  per-stream JSON file a window switcher can read (see [Window status](#window-status)).
+  per-stream JSON file, and read the stage back with `--report`. A window switcher
+  reads the file to badge each window (see [Window status](#window-status));
+  `sapa-flow` reads the stage to resume a stream at the phase it left off in.
 - `sapa gate` — walk the configured `gate.steps:` in order, run each `run:` step
   with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
   the `skill:` steps, and emit one structured line per result. It stops when it
@@ -351,10 +353,19 @@ Two orthogonal fields, each written by whoever knows it:
   Code hooks `sapa install` wires (`UserPromptSubmit → busy`, `Notification →
   needs-you`, `Stop → idle`). This is the "running vs at rest" signal.
 - `stage` — the lifecycle phase, `plan` | `build` | `gate` | `submit` | `watch`,
-  written by each phase skill as it runs.
+  written by each phase skill as its first act.
 
 They are written independently and merged, so the frequent run-state hook and the
-once-per-phase stage write never clobber each other. `sapa status` self-guards: it
+once-per-phase stage write never clobber each other.
+
+`stage` is read back inside sapa too, so it is more than a badge. `sapa status
+--report` prints it and writes nothing, and that is how `sapa-flow` re-enters a
+stream at the phase it left off in rather than starting over at plan, even in a
+session that no longer remembers where it was. So the field means "where this
+stream picks up": a caller that changes the answer writes the stage it wants
+resumed, which is why `sapa-flow` sets it back to `gate` after an interruption
+that edited the working tree. An unrecorded stage prints nothing and exits 0,
+which reads as a fresh stream that starts at the first phase. `sapa status` self-guards: it
 resolves the stream by walking up for the `.bare` project root, so the global hooks
 do nothing in any non-sapa session. On merge, `sapa teardown` clears the file.
 

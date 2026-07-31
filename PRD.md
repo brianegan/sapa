@@ -243,7 +243,16 @@ me through my existing notification hook, which opens the right window on click.
 - **One fused flow, separable phase skills.** `sapa-flow` is the fused default: a
   single invocation carries a stream from its issue through plan, build, gate,
   PR, and watch by invoking each phase skill in turn, with no second command. It
-  holds no logic of its own and stops wherever a phase stops. Each phase is its
+  implements none of the phases itself, and stops wherever a phase escalates. What it
+  does own is the crossing between phases, and that crossing is automatic: a phase
+  returning is not the flow ending, so the flow continues to the next phase without
+  asking the developer for permission, and only an escalation stops it. The same
+  rule holds one level down, inside `sapa-build` between tasks. It also survives
+  the developer interrupting mid-stream: their requests suspend the flow rather
+  than ending it, and once handled the flow re-enters on its own. Finally, the flow
+  is resumable, because it enters at the stage recorded for the stream rather than
+  at the top (below). So `sapa-flow` means "carry this stream forward from wherever
+  it is", not "run all five phases from the beginning". Each phase is its
   own skill with its own context and lifetime, and stays callable alone for the
   edge cases: `sapa-plan` to capture a plan, `sapa-build` to resume a recorded
   one, `sapa-gate` for checks without pushing, `sapa-submit` to open a PR that is
@@ -419,7 +428,20 @@ me through my existing notification hook, which opens the right window on click.
   producer with no hosted UI. Run-state comes from Claude Code hooks
   (`UserPromptSubmit → busy`, `Notification → needs-you`, `PreToolUse → busy`,
   `Stop → idle`) because hooks fire deterministically regardless of what the agent
-  is doing; stage comes from the phase skills. `PreToolUse` clears a stale
+  is doing; stage comes from the phase skills, each recording its own as its first
+  act. `stage` has since gained a second consumer inside sapa, which fixes its
+  meaning: `sapa status --report` prints it and writes nothing, and `sapa-flow`
+  reads it to enter a stream at the phase it left off in. So `stage` means "where
+  this stream picks up", not "the last phase that happened to run", and a caller
+  that changes the answer writes the stage it wants resumed rather than leaving a
+  stale one to be second-guessed at read time. That is why `sapa-flow` rewrites it
+  to `gate` after an interruption that changed the working tree, or to `plan` when
+  the interruption changed what the work should be: re-entry stays encoded in one
+  place, and a stream interrupted after a green gate cannot resume at submit and
+  push un-gated work. The read prints a bare value rather than JSON,
+  as `sapa issue key` and `sapa tmp` do, so no skill parses JSON in shell; an
+  unrecorded stage prints nothing and still exits 0, which the caller reads as
+  "begin at the first phase". `PreToolUse` clears a stale
   `needs-you` when the agent resumes work after you resolve a prompt without typing
   a fresh one (approving a permission or answering a tool-based question never
   fires `UserPromptSubmit`); it only downgrades `needs-you`, so firing on every

@@ -14,8 +14,9 @@ read it, the base branch, and the PR state from `sapa config -p`; GitHub goes
 through `gh`, Jira through `acli`. The PR body goes through `sapa section` (never
 clobbering human text); the issue plan goes through `sapa issue plan-comment`.
 
-Before anything else, mark the stream's stage for the window switcher: run `sapa
-status --stage watch` (best-effort — it no-ops outside a sapa stream). Teardown on
+Before anything else, record the stream's stage: run `sapa status --stage watch`
+(best-effort — it no-ops outside a sapa stream). It is how `/sapa-flow` resumes a
+stream at the phase it left off in. Teardown on
 merge clears the status file, so no explicit clear is needed here.
 
 ## Find the PR
