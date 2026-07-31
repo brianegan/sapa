@@ -245,14 +245,13 @@ def find_config(start: str) -> str:
 
 
 def worktree_root(start: str) -> str:
-    """The git worktree holding `start`. Everything the gate touches hangs off it.
+    """The git worktree holding `start`: the one anchor described at the top of this
+    file, resolved before anything else so everything else can hang off it.
 
-    One anchor, resolved before anything else: the config walk-up starts here, and
-    so do the scratch directory, the stream's issue, the diff against the base, and
-    each `run:` step's cwd. Anchoring on the config's directory instead is what #117
-    reported. In the `.bare` layout the config sits above the worktrees, beside a
-    `.bare` directory and nothing else, so every `run:` step executed against no
-    project and the branch read as the bare repo's HEAD rather than the worktree's.
+    Anchoring on the config's directory instead is what #117 reported. In the
+    `.bare` layout the config sits above the worktrees, beside a `.bare` directory
+    and nothing else, so every `run:` step executed against no project and the
+    branch read as the bare repo's HEAD rather than the worktree's.
 
     A caller not inside a work tree is refused rather than fallen back on. The one
     place that happens in practice is that same container directory, where falling
@@ -838,10 +837,8 @@ def report(start: str) -> int:
 def gate(start: str, after: str | None, list_only: bool,
          result: str | None = None, summary: str | None = None,
          fix_attempt: bool = False) -> int:
-    # The tree being gated, resolved before the config so the walk-up starts from
-    # it. Seeding discovery from the caller's cwd instead would let the two
-    # disagree: a `.sapa.yaml` in a subdirectory would supply the step list while
-    # the steps themselves ran at the worktree root.
+    # Discovery is seeded from the tree, not the caller's cwd, so the config that
+    # supplies the steps and the directory they run in cannot come apart.
     root = worktree_root(start)
     config_path = find_config(root)
     cfg = load_config(config_path)

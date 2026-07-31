@@ -58,6 +58,30 @@ def write(path, text):
         f.write(text)
 
 
+def seed_repo(path, branch, changes):
+    """A git repo at `path`: a base commit on `main`, then `branch` with `changes`.
+
+    Both layouts start from the same tree and diverge in how they hold it, flat in
+    `Repo` and behind a bare clone in `BareLayout`, so the seeding lives here once.
+    Leaves `main` checked out; each layout takes it from there.
+    """
+    os.makedirs(path, exist_ok=True)
+    git(path, "init", "-q", "-b", "main")
+    git(path, "config", "user.email", "t@example.com")
+    git(path, "config", "user.name", "Test")
+    write(os.path.join(path, "seed.txt"), "seed\n")
+    git(path, "add", ".")
+    git(path, "commit", "-qm", "base")
+    git(path, "checkout", "-q", "-b", branch)
+    for rel in changes:
+        full = os.path.join(path, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        write(full, "change\n")
+    if changes:
+        git(path, "add", ".")
+        git(path, "commit", "-qm", "work")
+
+
 class Fixture:
     """Shared plumbing for a fixture: a stubbed `gh`, a scratch root scoped to the
     temp dir, and a way to run the helper against the tree.
@@ -174,22 +198,8 @@ class Repo(Fixture):
 
     def __init__(self, tmp, config, branch="42-feature", changes=("a.txt", "pkg/b.txt")):
         self.dir = os.path.join(tmp, "repo")
-        os.makedirs(self.dir)
-        git(self.dir, "init", "-q", "-b", "main")
-        git(self.dir, "config", "user.email", "t@example.com")
-        git(self.dir, "config", "user.name", "Test")
-        write(os.path.join(self.dir, "seed.txt"), "seed\n")
-        git(self.dir, "add", ".")
-        git(self.dir, "commit", "-qm", "base")
-        git(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
-        git(self.dir, "checkout", "-q", "-b", branch)
-        for rel in changes:
-            path = os.path.join(self.dir, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            write(path, "change\n")
-        if changes:
-            git(self.dir, "add", ".")
-            git(self.dir, "commit", "-qm", "work")
+        seed_repo(self.dir, branch, changes)
+        git(self.dir, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
         write(os.path.join(self.dir, ".sapa.yaml"), config)
 
         self.stream = os.path.basename(self.dir)
@@ -224,21 +234,9 @@ class BareLayout(Fixture):
 
     def __init__(self, tmp, config, branch="42-feature", changes=("a.txt", "pkg/b.txt")):
         src = os.path.join(tmp, "src")
-        os.makedirs(src)
-        git(src, "init", "-q", "-b", "main")
-        git(src, "config", "user.email", "t@example.com")
-        git(src, "config", "user.name", "Test")
-        write(os.path.join(src, "seed.txt"), "seed\n")
-        git(src, "add", ".")
-        git(src, "commit", "-qm", "base")
-        git(src, "checkout", "-q", "-b", branch)
-        for rel in changes:
-            path = os.path.join(src, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            write(path, "change\n")
-        if changes:
-            git(src, "add", ".")
-            git(src, "commit", "-qm", "work")
+        seed_repo(src, branch, changes)
+        # Back to `main` before cloning, so the bare clone's HEAD is `main` and the
+        # worktree add below is free to take `branch`.
         git(src, "checkout", "-q", "main")
 
         self.root = os.path.join(tmp, "project")
@@ -463,7 +461,9 @@ def test_a_failing_step_stops_the_walk_and_exits_1():
 
 
 @case
-def test_steps_run_at_the_config_root_not_the_start_dir():
+def test_steps_run_at_the_worktree_root_not_the_start_dir():
+    """Invoked from a subdirectory, steps still run at the top of the tree, so a
+    relative `run:` path means the same thing wherever inside it you stood."""
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, gate_of(run_step("where", "pwd > where.txt")))
         nested = os.path.join(repo.dir, "pkg", "deep")
