@@ -474,10 +474,6 @@ def test_steps_run_at_the_worktree_root_not_the_start_dir():
 
 
 # --- the tree the gate runs in (#117) ------------------------------------------
-#
-# The walk-up locates the config. It does not relocate execution: the gate runs
-# where the caller's worktree is, so a config above the worktrees covers all of
-# them instead of dragging every step into the container it sits in.
 
 @case
 def test_a_config_above_the_worktrees_still_runs_steps_in_the_worktree():

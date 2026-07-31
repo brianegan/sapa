@@ -38,14 +38,21 @@ Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
   `skill:` steps; Step 3 says how to honour it. Absent, the step runs on the
   session model.
 
-Exit 2 means there is nothing to run: no config, no `gate:` map, no
-`gate.steps:`, a malformed step, or a `max_fix_attempts:` that is not a count.
-The message says which. On a missing config, ask whether to use a sensible
-default gate (test + format) or stop; on a malformed one, report it and stop
-rather than guessing what was meant. A config whose `gate:` is still the old flat
-list of steps gets an exit 2 naming the edit that fixes it: put the list under a
-`steps:` key. That is a config change for the developer to make, not one to make
-for them silently.
+Exit 2 means nothing ran, and the message says which of two causes it was.
+
+**Not in a worktree.** `sapa gate` resolves the tree it is gating before it looks
+for a config, so a caller outside a work tree is refused rather than gated
+somewhere arbitrary. In a `.bare` layout that means the container directory, the
+one holding `.bare` and the worktree directories. Move to the worktree you meant
+and run again. Do not offer a config here — the config is not the problem.
+
+**Nothing to run.** No config, no `gate:` map, no `gate.steps:`, a malformed
+step, or a `max_fix_attempts:` that is not a count. On a missing config, ask
+whether to use a sensible default gate (test + format) or stop; on a malformed
+one, report it and stop rather than guessing what was meant. A config whose
+`gate:` is still the old flat list of steps gets an exit 2 naming the edit that
+fixes it: put the list under a `steps:` key. That is a config change for the
+developer to make, not one to make for them silently.
 
 ## Step 2 — Rebase the branch up to date
 
@@ -135,7 +142,9 @@ Act on the exit code:
   with `sapa gate --fix-attempt`, within the budget below. Do not certify green
   until every step passes. The user may interrupt to change something and rerun
   `/sapa-gate`.
-- **2 — nothing to run.** Back to Step 1: the config is missing or malformed.
+- **2 — nothing ran.** Back to Step 1: either you are outside a worktree, or the
+  config is missing or malformed. The message says which, and the two take
+  different recoveries.
 - **5 — the autofix budget is spent, so nothing ran.** You reached for another fix
   after the budget said stop. Do not try again: report where it stands and hand
   the stream back, as below.

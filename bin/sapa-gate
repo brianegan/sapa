@@ -126,8 +126,8 @@ Exit codes:
     2  a config or usage error — a caller outside a git worktree, no config, no
        `gate:` map, no `gate.steps:`, a malformed step or budget, an unknown
        `--after` name, `--result` without `--after` or against a `run:` step,
-       `--fix-attempt` with `--after`, or PyYAML missing. `--report` needs the
-       worktree and nothing else, so that first case is the only one it raises
+       `--fix-attempt` with `--after`, or PyYAML missing. `--report` reads no
+       config, so of these it raises only the first
     4  stopped at a `skill:` step awaiting dispatch
     5  the autofix budget is spent, so a `--fix-attempt` ran nothing
 
