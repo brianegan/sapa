@@ -164,7 +164,19 @@ me through my existing notification hook, which opens the right window on click.
   covers every command sapa uses.
 - **Config discovery.** The tool finds its config by walking up from the current
   directory until it finds a config file, the same pattern `sapa worktree` uses
-  to locate `.bare`.
+  to locate `.bare`. The walk locates the config; it never relocates execution
+  (#117). `sapa gate` resolves the caller's git worktree first and hangs
+  everything off that one anchor — the config walk-up, the scratch directory, the
+  stream's issue, the diff against the base, and each `run:` step's cwd — because
+  in the `.bare` layout the config sits beside `.bare`, above every worktree, and
+  a gate anchored on the config's directory ran its steps against a directory
+  holding no project and read the bare repo's HEAD as the branch, which cost the
+  `skill:` steps their spec source without saying so. One anchor rather than two:
+  seeding discovery from the caller's cwd instead would let a `.sapa.yaml` in a
+  subdirectory supply the step list while the steps ran at the worktree root. A
+  caller outside a work tree is refused rather than fallen back on, since the
+  fallback is precisely the broken state. This is what lets one config beside
+  `.bare` cover every worktree, which is what the walk-up existed for.
 - **Config expressiveness.** A gate step can be either a shell command or a
   skill invocation (for example, the wingspan review skill as the review step),
   and commands can carry a version-manager prefix (for example `fvm dart

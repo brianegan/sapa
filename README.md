@@ -141,8 +141,14 @@ sapa start 42     # issue 42 -> worktree, opens your editor
 
 ## Config
 
-Drop a `.sapa.yaml` at the root of any repo. A few optional top-level keys tune
-the flow, each with a backward-compatible default:
+Drop a `.sapa.yaml` at the root of any repo. Sapa walks up to find it, so in the
+`.bare` layout it can sit beside `.bare` and cover every worktree at once instead
+of being copied into each one. The walk locates the config and nothing more:
+`sapa gate` runs its steps in the worktree you invoked it from, not in the
+directory the config was found in.
+
+A few optional top-level keys tune the flow, each with a backward-compatible
+default:
 
 - `base:` — the branch PRs target (default `main`). `sapa-gate` rebases onto it
   before running the checks.

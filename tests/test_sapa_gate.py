@@ -58,53 +58,52 @@ def write(path, text):
         f.write(text)
 
 
-class Repo:
-    """A temp git repo with a base commit, an `origin/main` ref, and a branch.
+def seed_repo(path, branch, changes):
+    """A git repo at `path`: a base commit on `main`, then `branch` with `changes`.
 
-    The branch is named `42-feature` so `sapa issue` can derive a GitHub issue
-    from it; the `origin/main` ref is planted locally so the merge-base diff
-    resolves with no network.
+    Both layouts start from the same tree and diverge in how they hold it, flat in
+    `Repo` and behind a bare clone in `BareLayout`, so the seeding lives here once.
+    Leaves `main` checked out; each layout takes it from there.
+    """
+    os.makedirs(path, exist_ok=True)
+    git(path, "init", "-q", "-b", "main")
+    git(path, "config", "user.email", "t@example.com")
+    git(path, "config", "user.name", "Test")
+    write(os.path.join(path, "seed.txt"), "seed\n")
+    git(path, "add", ".")
+    git(path, "commit", "-qm", "base")
+    git(path, "checkout", "-q", "-b", branch)
+    for rel in changes:
+        full = os.path.join(path, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        write(full, "change\n")
+    if changes:
+        git(path, "add", ".")
+        git(path, "commit", "-qm", "work")
+
+
+class Fixture:
+    """Shared plumbing for a fixture: a stubbed `gh`, a scratch root scoped to the
+    temp dir, and a way to run the helper against the tree.
+
+    Two layouts build on it. `Repo` is the flat one, config at the repo root, which
+    is what every case used before the bare layout got a fixture of its own.
+    `BareLayout` is the `.bare` container, config above the worktrees. A subclass
+    sets `dir`, the directory the gate is invoked from, and `stream`, the key
+    `sapa tmp` derives from that directory; the scratch paths below follow from
+    the pair rather than being spelled per layout.
     """
 
-    def __init__(self, tmp, config, branch="42-feature", changes=("a.txt", "pkg/b.txt")):
-        self.dir = os.path.join(tmp, "repo")
-        os.makedirs(self.dir)
-        git(self.dir, "init", "-q", "-b", "main")
-        git(self.dir, "config", "user.email", "t@example.com")
-        git(self.dir, "config", "user.name", "Test")
-        write(os.path.join(self.dir, "seed.txt"), "seed\n")
-        git(self.dir, "add", ".")
-        git(self.dir, "commit", "-qm", "base")
-        git(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
-        git(self.dir, "checkout", "-q", "-b", branch)
-        for rel in changes:
-            path = os.path.join(self.dir, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            write(path, "change\n")
-        if changes:
-            git(self.dir, "add", ".")
-            git(self.dir, "commit", "-qm", "work")
-        write(os.path.join(self.dir, ".sapa.yaml"), config)
+    dir = ""
+    stream = ""
 
+    def plumbing(self, tmp):
         self.bindir = os.path.join(tmp, "bin")
         os.makedirs(self.bindir)
         gh = os.path.join(self.bindir, "gh")
         write(gh, GH_STUB)
         os.chmod(gh, 0o755)
         self.tmpdir = os.path.join(tmp, "scratch")
-
-    def break_pyyaml(self):
-        """Put a `yaml` module that refuses to import ahead of the real one.
-
-        The helper's own `import yaml` then raises ImportError, which is the exact
-        state a machine without PyYAML is in. Simulated rather than assumed: the
-        suite runs where PyYAML is installed, so this is the only way to reach the
-        one error path that exists because the dependency is new.
-        """
-        shim = os.path.join(self.dir, "..", "noyaml")
-        os.makedirs(shim, exist_ok=True)
-        write(os.path.join(shim, "yaml.py"), "raise ImportError('no pyyaml here')\n")
-        return os.path.abspath(shim)
 
     def env(self, plan=None, gh_fails=False):
         env = dict(os.environ)
@@ -164,10 +163,10 @@ class Repo:
         return os.path.exists(os.path.join(self.dir, rel))
 
     def plan_path(self):
-        return os.path.join(self.tmpdir, "repo", "plan.md")
+        return os.path.join(self.tmpdir, self.stream, "plan.md")
 
     def record_path(self):
-        return os.path.join(self.tmpdir, "repo", "gate-record.json")
+        return os.path.join(self.tmpdir, self.stream, "gate-record.json")
 
     def record(self):
         """The parsed gate record, or None when the gate wrote none."""
@@ -187,6 +186,80 @@ class Repo:
     def sha(self, ref="HEAD"):
         return subprocess.run(["git", "-C", self.dir, "rev-parse", ref],
                               capture_output=True, text=True).stdout.strip()
+
+
+class Repo(Fixture):
+    """A temp git repo with a base commit, an `origin/main` ref, and a branch.
+
+    The branch is named `42-feature` so `sapa issue` can derive a GitHub issue
+    from it; the `origin/main` ref is planted locally so the merge-base diff
+    resolves with no network.
+    """
+
+    def __init__(self, tmp, config, branch="42-feature", changes=("a.txt", "pkg/b.txt")):
+        self.dir = os.path.join(tmp, "repo")
+        seed_repo(self.dir, branch, changes)
+        git(self.dir, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
+        write(os.path.join(self.dir, ".sapa.yaml"), config)
+
+        self.stream = os.path.basename(self.dir)
+        self.plumbing(tmp)
+
+    def break_pyyaml(self):
+        """Put a `yaml` module that refuses to import ahead of the real one.
+
+        The helper's own `import yaml` then raises ImportError, which is the exact
+        state a machine without PyYAML is in. Simulated rather than assumed: the
+        suite runs where PyYAML is installed, so this is the only way to reach the
+        one error path that exists because the dependency is new.
+        """
+        shim = os.path.join(self.dir, "..", "noyaml")
+        os.makedirs(shim, exist_ok=True)
+        write(os.path.join(shim, "yaml.py"), "raise ImportError('no pyyaml here')\n")
+        return os.path.abspath(shim)
+
+
+class BareLayout(Fixture):
+    """The layout `sapa bootstrap` creates: a `.bare` clone, a `.git` pointer file
+    beside it, one directory per worktree, and `.sapa.yaml` above them all.
+
+    This is the shape #117 reported, and the reason it needs a fixture of its own
+    is that `Repo` cannot express it. There the config sits at the repo root, which
+    is also the worktree root, so the two candidate anchors are the same directory
+    and a gate anchored on the wrong one still looks right. Here they differ: the
+    container holds only `.bare` and the worktree directories, so a gate that runs
+    where the config lives runs against no project at all, and reads the bare
+    repo's HEAD as the branch instead of the worktree's.
+    """
+
+    def __init__(self, tmp, config, branch="42-feature", changes=("a.txt", "pkg/b.txt")):
+        src = os.path.join(tmp, "src")
+        seed_repo(src, branch, changes)
+        # Back to `main` before cloning, so the bare clone's HEAD is `main` and the
+        # worktree add below is free to take `branch`.
+        git(src, "checkout", "-q", "main")
+
+        self.root = os.path.join(tmp, "project")
+        os.makedirs(self.root)
+        bare = os.path.join(self.root, ".bare")
+        subprocess.run(["git", "clone", "-q", "--bare", src, bare], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        write(os.path.join(self.root, ".git"), "gitdir: ./.bare\n")
+        # `origin/main` planted locally, as in `Repo`, so the merge-base diff needs
+        # no network. A bare clone keeps `refs/heads/*` and no remote refs of its own.
+        subprocess.run(["git", "--git-dir", bare, "update-ref",
+                        "refs/remotes/origin/main", "refs/heads/main"], check=True)
+        git(self.root, "worktree", "add", "-q", branch, branch)
+
+        self.dir = os.path.join(self.root, branch)
+        self.stream = branch
+        write(os.path.join(self.root, ".sapa.yaml"), config)
+        self.plumbing(tmp)
+
+    def container_has(self, rel):
+        """Whether `rel` exists in the container, which is where a step anchored on
+        the config's directory rather than the worktree would leave it."""
+        return os.path.exists(os.path.join(self.root, rel))
 
 
 def lines(stdout):
@@ -388,7 +461,9 @@ def test_a_failing_step_stops_the_walk_and_exits_1():
 
 
 @case
-def test_steps_run_at_the_config_root_not_the_start_dir():
+def test_steps_run_at_the_worktree_root_not_the_start_dir():
+    """Invoked from a subdirectory, steps still run at the top of the tree, so a
+    relative `run:` path means the same thing wherever inside it you stood."""
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, gate_of(run_step("where", "pwd > where.txt")))
         nested = os.path.join(repo.dir, "pkg", "deep")
@@ -396,6 +471,69 @@ def test_steps_run_at_the_config_root_not_the_start_dir():
         p = repo.run(start=nested)
         assert p.returncode == 0, p.stderr
         assert repo.read("where.txt").strip() == os.path.realpath(repo.dir), repo.read("where.txt")
+
+
+# --- the tree the gate runs in (#117) ------------------------------------------
+
+@case
+def test_a_config_above_the_worktrees_still_runs_steps_in_the_worktree():
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = BareLayout(tmp, gate_of(run_step("test", "echo ran > ran.txt")))
+        p = fx.run()
+        assert p.returncode == 0, p.stderr + p.stdout
+        assert fx.has("ran.txt"), "the step did not run in the worktree"
+        assert not fx.container_has("ran.txt"), \
+            "the step ran in the container holding the config"
+
+
+@case
+def test_changed_files_is_computed_from_the_worktree_not_the_container():
+    """The container's HEAD is the bare repo's, which is `main`, so a diff taken
+    there comes back empty and every step is told the branch changed nothing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = BareLayout(tmp, gate_of(run_step(
+            "capture", "printf '%s\\n' \"$SAPA_CHANGED_FILES\" > changed.txt")))
+        p = fx.run()
+        assert p.returncode == 0, p.stderr + p.stdout
+        assert sorted(fx.read("changed.txt").split()) == ["a.txt", "pkg/b.txt"], \
+            fx.read("changed.txt")
+
+
+@case
+def test_the_stream_resolves_from_the_worktree_so_the_plan_is_found():
+    """The worse half of #117: the branch read as `main`, `sapa issue` could derive
+    no issue from it, and the plan came back absent, silently costing the `skill:`
+    step its spec source on a stream that had a plan recorded all along."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = BareLayout(tmp, gate_of(skill_step("review", "code-review")))
+        p = fx.run(plan="# Plan\n")
+        assert p.returncode == 4, p.stderr + p.stdout
+        plan = [ln for ln in lines(p.stdout) if ln[0] == "plan"]
+        assert plan == [["plan", fx.plan_path(), "present"]], \
+            f"{plan} (stderr: {p.stderr})"
+
+
+@case
+def test_the_gate_record_is_keyed_on_the_stream_not_the_container():
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = BareLayout(tmp, gate_of(run_step("test", "true")))
+        fx.run()
+        assert fx.runs(), f"no record at {fx.record_path()}"
+        assert fx.runs()[-1]["head_sha"] == fx.sha("HEAD"), fx.runs()[-1]
+
+
+@case
+def test_a_gate_outside_a_work_tree_is_refused_rather_than_run():
+    """The container is a bare repo, so there is no tree to gate. Falling back to
+    it would run every step against a directory holding only `.bare` and the
+    worktrees, which is the failure #117 reported."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = BareLayout(tmp, gate_of(run_step("test", "echo ran > ran.txt")))
+        for args in ([], ["--list"], ["--report"]):
+            p = fx.run(*args, start=fx.root)
+            assert p.returncode == 2, f"{args}: exit {p.returncode}: {p.stderr}"
+            assert fx.root in p.stderr, f"{args}: {p.stderr!r}"
+        assert not fx.container_has("ran.txt"), "a step ran in the container anyway"
 
 
 # --- skill steps: halt and resume ---------------------------------------------
@@ -921,6 +1059,21 @@ def test_report_with_no_record_says_so_and_exits_0():
         repo = Repo(tmp, gate_of(run_step("test", "true")))
         p = repo.run("--report")
         assert p.returncode == 0, p.stderr
+        assert p.stdout.startswith("## Gates\n"), p.stdout
+        assert "No gate record was found" in p.stdout, p.stdout
+
+
+@case
+def test_report_needs_no_config_to_render():
+    """`--report` runs no steps and reads no `gate:` key, so it does not need a
+    config to answer. A repo with no `.sapa.yaml` gets the no-record section, which
+    is the same answer as a repo that has one and has not gated yet, and is the one
+    `/sapa-submit` can use without special-casing an exit code that means it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(run_step("test", "true")))
+        os.remove(os.path.join(repo.dir, ".sapa.yaml"))
+        p = repo.run("--report", start=repo.dir)
+        assert p.returncode == 0, f"exit {p.returncode}: {p.stderr}"
         assert p.stdout.startswith("## Gates\n"), p.stdout
         assert "No gate record was found" in p.stdout, p.stdout
 
