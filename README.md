@@ -1,6 +1,6 @@
 # Sapa
 
-Sapa (Filipino for "stream") runs a piece of work from a fresh worktree to a
+Sapa (Filipino for "brook" or "stream") runs a piece of work from a fresh worktree to a
 merged PR. It bootstraps a repo into a worktree layout and spins up a worktree
 per stream, then once the code is written it gates the work, captures the plan
 on the GitHub issue, and ships it as a PR (draft by default).
