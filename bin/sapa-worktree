@@ -9,8 +9,17 @@
 # Usage:
 #   sapa worktree <branch-name> [start-point]
 #
-# The editor is $EDITOR (falling back to $VISUAL). If neither is set the worktree
-# path is printed instead of opened.
+# Opening is opt-in. Set `editor:` in your personal `~/.sapa/settings.yaml` to a
+# command and it runs with the new worktree as its last argument:
+#
+#   editor: code -n
+#
+# Leave it unset and the worktree path is printed instead, for you to open how
+# you like. The setting is personal rather than a project key on purpose: which
+# editor you run is yours, not something a checked-in config should decide for
+# the rest of the team. It is a sapa setting rather than $EDITOR because $EDITOR
+# is one answer shared by every tool on the machine, and the program you want for
+# a commit message is rarely the one you want a whole worktree opened in.
 
 set -euo pipefail
 
@@ -77,11 +86,33 @@ if [ -x "$project_root/.worktree-setup" ]; then
   "$project_root/.worktree-setup"
 fi
 
-# Open the new worktree in the user's editor. Respect $EDITOR (then $VISUAL) so
-# this works on machines without VS Code's `code`; if neither is set, just print
-# the path so the caller knows where the worktree landed.
-editor="${EDITOR:-${VISUAL:-}}"
+# Open the new worktree, if the personal settings say to. Unset means print the
+# path instead, so sapa opens nothing you did not ask it to open.
+#
+# Resolve sapa-settings: prefer PATH, fall back to a sibling of this script, so
+# the editor is found even when this is invoked by an absolute path with an empty
+# PATH. A best-effort grep of the printed settings — no YAML parser — mirroring
+# how the skills read their keys. Quotes are stripped so `editor: "code -n"`
+# works too.
+sapa_settings="$(command -v sapa-settings || true)"
+if [ -z "$sapa_settings" ] && [ -x "$(dirname "$0")/sapa-settings" ]; then
+  sapa_settings="$(dirname "$0")/sapa-settings"
+fi
+editor=""
+if [ -n "$sapa_settings" ]; then
+  editor="$("$sapa_settings" -p 2>/dev/null \
+            | sed -nE 's/^[[:space:]]*editor:[[:space:]]*(.+)$/\1/p' \
+            | head -1 \
+            | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+fi
+
+# Unquoted on purpose: `editor: code -n` has to split into a command and its
+# flags, the way a shell would read it. `set -f` first so that is all it does —
+# splitting is the contract, and an editor value holding a `*` should reach the
+# editor as a `*` rather than as whatever happens to sit in the current
+# directory.
 if [ -n "$editor" ]; then
+  set -f
   exec $editor "$worktree_dir"
 else
   echo "$worktree_dir"

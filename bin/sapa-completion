@@ -108,6 +108,17 @@ $pairs
         _arguments '(-p --print)'{-p,--print}'[print the config contents]' '--start[search from this directory]:directory:_files -/'
       fi
       ;;
+    settings)
+      if (( CURRENT == 3 )); then
+        _alternative \
+          'subcommands:subcommand:((init\:"write a commented ~/.sapa/settings.yaml"))' \
+          'flags:flag:((-p\:"print the settings contents" --print\:"print the settings contents"))'
+      elif [[ \${words[3]} == init ]]; then
+        _arguments '--force[overwrite existing settings]'
+      else
+        _arguments '(-p --print)'{-p,--print}'[print the settings contents]'
+      fi
+      ;;
     tmp)        _arguments '--start[resolve the stream from here]:directory:_files -/' ;;
     section)    _arguments ':marker: ' '--content-file[new content]:file:_files' '--body-file[body to patch]:file:_files' '--check[report ownership status only]' '--lock[lock the section]' ;;
     status)     _arguments '--state[run-state]:state:(busy idle needs-you)' '--notification[Notification hook: write needs-you only if genuine]' '--active[PreToolUse hook: clear a stale needs-you on resumed work]' '--stage[lifecycle stage]:stage:(plan build gate submit watch)' '--report[print the recorded stage, write nothing]' '--clear[remove this stream'\''s status file]' '--start[resolve the stream from here]:directory:_files -/' ;;
@@ -129,6 +140,7 @@ $pairs
         _files -/
       fi
       ;;
+    close)      _arguments ':target:(code)' ':worktree basename: ' ;;
     completion) _values 'shell' 'zsh' ;;
   esac
 }

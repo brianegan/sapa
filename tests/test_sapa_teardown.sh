@@ -6,12 +6,21 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TEARDOWN="$HERE/../bin/sapa-teardown"
-# Put bin on PATH so teardown can resolve sapa-config for the close_window key.
+# Put bin on PATH so teardown can resolve sapa-settings for the closer key.
 export PATH="$HERE/../bin:$PATH"
 
 pass=0; fail=0
 ok()   { echo "ok   $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL $1"; fail=$((fail+1)); }
+
+# Build a bare-layout project: root/.bare + a main worktree + a feature worktree.
+root="$(mktemp -d)"
+
+# Sandbox HOME for the whole file. Teardown reads `closer:` from
+# ~/.sapa/settings.yaml, so a developer running this with a real closer
+# configured would otherwise have it fire against their own live editor.
+export HOME="$root/home"
+mkdir -p "$HOME"
 
 # Stub the window closer so no real osascript ever runs during tests (it would
 # otherwise try to close live VS Code windows on a developer's mac). The stub
@@ -25,9 +34,7 @@ EOF
 chmod +x "$closer"
 export SAPA_TEARDOWN_CLOSER="$closer"
 
-# Build a bare-layout project: root/.bare + a main worktree + a feature worktree.
-root="$(mktemp -d)"
-trap 'rm -rf "$root" "$closer" "$recorded"' EXIT
+trap 'rm -rf "$root" "$closer" "$recorded" "$argrec"' EXIT
 proj="$root/proj"
 mkdir -p "$proj"
 git init --bare "$proj/.bare" -q
@@ -41,8 +48,8 @@ git -C "$proj/main" worktree add -q "$proj/feature" -b feature
 out="$(bash "$TEARDOWN" "$proj/feature" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/feature" ]; then ok "removes clean worktree"; else bad "removes clean worktree ($out)"; fi
 if ! git -C "$proj/main" branch --list feature | grep -q feature; then ok "deletes local branch"; else bad "deletes local branch"; fi
-# By default the window closer runs with the worktree's basename.
-if grep -qx "feature" "$recorded"; then ok "closes window by default"; else bad "closes window by default (recorded: $(cat "$recorded"))"; fi
+# The configured closer runs with the worktree's basename.
+if grep -qx "feature" "$recorded"; then ok "runs the configured closer"; else bad "runs the configured closer (recorded: $(cat "$recorded"))"; fi
 
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
@@ -67,19 +74,111 @@ git -C "$proj/main" worktree add -q "$proj/inside" -b inside
 out="$(cd "$proj/inside" && bash "$TEARDOWN" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/inside" ]; then ok "removes cwd worktree from within"; else bad "removes cwd worktree from within (rc=$rc, $out)"; fi
 
-# --- close_window: false suppresses the window close ---
-printf 'close_window: false\n' > "$proj/.sapa.yaml"
+# --- with no closer configured at all, nothing is closed ---
+# Closing is opt-in: no settings file and no override means teardown removes the
+# worktree and leaves every window alone.
+#
+# Watching only the stub above would not prove that. It stays silent whether
+# teardown ran nothing or reached for some *other* closer, and a teardown that
+# quietly fell back to a built-in default would drive a developer's real editor
+# while the test still passed. So shadow the shipped closer on PATH with a
+# recorder and require that it, too, was never called.
+shadow_bin="$root/shadow-bin"
+shadowed="$root/shadowed"
+mkdir -p "$shadow_bin"
+for name in sapa sapa-close; do
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$shadowed" > "$shadow_bin/$name"
+  chmod +x "$shadow_bin/$name"
+done
+: > "$shadowed"
+
 git -C "$proj/main" worktree add -q "$proj/noclose" -b noclose
 : > "$recorded"
-out="$(bash "$TEARDOWN" "$proj/noclose" 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && [ ! -s "$recorded" ]; then ok "close_window: false suppresses close"; else bad "close_window: false suppresses close (rc=$rc, recorded: $(cat "$recorded"))"; fi
+out="$(PATH="$shadow_bin:$PATH" env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/noclose" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/noclose" ] && [ ! -s "$recorded" ] && [ ! -s "$shadowed" ]; then
+  ok "no closer configured closes nothing"
+else
+  bad "no closer configured closes nothing (rc=$rc, recorded: $(cat "$recorded"), shadowed: $(cat "$shadowed"))"
+fi
 
-# --- opt-out is honoured even when sapa-config is not on PATH (sibling fallback) ---
-git -C "$proj/main" worktree add -q "$proj/nopath" -b nopath
+# --- a `closer:` in the personal settings is read and run ---
+mkdir -p "$HOME/.sapa"
+printf 'closer: %s\n' "$closer" > "$HOME/.sapa/settings.yaml"
+git -C "$proj/main" worktree add -q "$proj/fromsettings" -b fromsettings
 : > "$recorded"
-out="$(PATH=/usr/bin:/bin bash "$TEARDOWN" "$proj/nopath" 2>&1)"; rc=$?
-if [ $rc -eq 0 ] && [ ! -s "$recorded" ]; then ok "opt-out honoured without sapa-config on PATH"; else bad "opt-out honoured without sapa-config on PATH (rc=$rc, recorded: $(cat "$recorded"))"; fi
-rm -f "$proj/.sapa.yaml"
+out="$(env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/fromsettings" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -qx "fromsettings" "$recorded"; then
+  ok "runs the closer from settings"
+else
+  bad "runs the closer from settings (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+
+# A quoted value works too, since YAML allows it and the read is a grep.
+git -C "$proj/main" worktree add -q "$proj/quoted" -b quoted
+printf 'closer: "%s"\n' "$closer" > "$HOME/.sapa/settings.yaml"
+: > "$recorded"
+out="$(env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/quoted" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -qx "quoted" "$recorded"; then
+  ok "strips quotes around the closer value"
+else
+  bad "strips quotes around the closer value (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+
+# --- a multi-word closer keeps its arguments (this is how `sapa close code` runs) ---
+# Records every argument it was handed, so these cases can assert on the whole
+# argument list rather than just the basename.
+argrec="$(mktemp)"
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$recorded" > "$argrec"
+chmod +x "$argrec"
+git -C "$proj/main" worktree add -q "$proj/multiword" -b multiword
+printf 'closer: %s code\n' "$argrec" > "$HOME/.sapa/settings.yaml"
+: > "$recorded"
+out="$(env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/multiword" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -qx "code multiword" "$recorded"; then
+  ok "a multi-word closer keeps its own arguments"
+else
+  bad "a multi-word closer keeps its own arguments (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+
+# --- the closer value splits on spaces but is not globbed ---
+git -C "$proj/main" worktree add -q "$proj/globby" -b globby
+printf 'closer: %s -x *.txt\n' "$argrec" > "$HOME/.sapa/settings.yaml"
+: > "$recorded"
+out="$(cd "$proj/main" && touch decoy-a.txt decoy-b.txt \
+       && env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/globby" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -Fqx -- "-x *.txt globby" "$recorded"; then
+  ok "the closer value is split but not globbed"
+else
+  bad "the closer value is split but not globbed (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+rm -f "$proj/main/decoy-a.txt" "$proj/main/decoy-b.txt"
+
+# --- settings are read even when sapa-settings is not on PATH (sibling fallback) ---
+git -C "$proj/main" worktree add -q "$proj/nopath" -b nopath
+printf 'closer: %s\n' "$closer" > "$HOME/.sapa/settings.yaml"
+: > "$recorded"
+out="$(PATH=/usr/bin:/bin env -u SAPA_TEARDOWN_CLOSER bash "$TEARDOWN" "$proj/nopath" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -qx "nopath" "$recorded"; then
+  ok "reads the closer without sapa-settings on PATH"
+else
+  bad "reads the closer without sapa-settings on PATH (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+
+# --- the env override beats a configured closer ---
+override="$(mktemp)"
+overrode="$(mktemp)"
+printf '#!/bin/bash\nprintf "%%s\\n" "$1" >> "%s"\n' "$overrode" > "$override"
+chmod +x "$override"
+git -C "$proj/main" worktree add -q "$proj/override" -b override
+: > "$recorded"
+out="$(SAPA_TEARDOWN_CLOSER="$override" bash "$TEARDOWN" "$proj/override" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && grep -qx "override" "$overrode" && [ ! -s "$recorded" ]; then
+  ok "SAPA_TEARDOWN_CLOSER beats the settings closer"
+else
+  bad "SAPA_TEARDOWN_CLOSER beats the settings closer (rc=$rc, recorded: $(cat "$recorded"))"
+fi
+rm -f "$override" "$overrode"
+rm -f "$HOME/.sapa/settings.yaml"
 
 # --- a failing closer never fails the teardown ---
 git -C "$proj/main" worktree add -q "$proj/badcloser" -b badcloser

@@ -12,20 +12,20 @@
 #     caller's shell cwd will be invalid afterwards — that is expected, the
 #     window is closed for you.
 #
-# Closing the editor window: after removal it closes the VS Code window that was
-# open on the worktree, so there is no manual window management. It finds the
-# window by the worktree's basename (unique per stream) and presses that window's
-# own close button — only when exactly one window matches, so it can never touch
-# another window. Strictly best-effort — macOS + VS Code only, and it never fails
-# the teardown. Disable it with `close_window: false` in `.sapa.yaml`. Set
-# `SAPA_TEARDOWN_CLOSER` to a command that receives the basename to override how
-# the close is performed (used by the tests).
+# Closing the editor window: teardown closes nothing on its own. Set `closer:`
+# in your personal `~/.sapa/settings.yaml` to a command and teardown runs it with
+# the removed worktree's basename, so the window that was open on the stream goes
+# with it. sapa ships one closer, `sapa close code`; see its help for what it
+# drives, and write your own for any other editor:
 #
-# Pressing another app's button goes through System Events, which macOS gates
-# behind Accessibility permission. If that permission is missing the close can't
-# happen, so — rather than fail silently — teardown prints a one-line hint
-# telling you to grant Accessibility to the app running this terminal (e.g.
-# Visual Studio Code) in System Settings > Privacy & Security > Accessibility.
+#   closer: sapa close code
+#
+# Leave `closer:` unset and teardown touches no windows. The setting is personal
+# rather than a project key on purpose: which editor you run is yours, not
+# something a checked-in config should decide for the rest of the team.
+#
+# `SAPA_TEARDOWN_CLOSER` overrides the setting with a command of the same shape
+# (used by the tests, which must never drive a real editor).
 #
 # Usage:
 #   sapa teardown [worktree-path]     # defaults to the current directory
@@ -33,72 +33,32 @@
 
 set -euo pipefail
 
-# Close the editor window open on the removed worktree. Best-effort: it never
-# fails the teardown, which has already done its work by the time this runs. The
-# close mechanism reports a status so the one failure worth surfacing — macOS
-# denying Accessibility — becomes an actionable hint instead of silence. Status
-# is one of: `closed`, `no-match` (zero or several windows matched), `no-editor`
-# (VS Code not running), `error:<n>` (any failure, e.g. -25211 = no assistive
-# access), or empty (the close killed osascript before it could report — that
-# only happens on success, so treat it as `closed`).
+# Run the configured closer on the removed worktree's basename. Best-effort: it
+# never fails the teardown, which has already done its work by the time this
+# runs. A closer reports a status on stdout so the failures worth surfacing
+# become an actionable line instead of silence. Status is one of: `closed`,
+# `no-match` (zero or several windows matched), `no-editor` (nothing to close),
+# `error:<n>` (any failure), or empty (the close killed the closer before it
+# could report — that only happens on success, so treat it as done).
 #
-# An override command (SAPA_TEARDOWN_CLOSER) takes the basename as $1 and emits
-# the same status on stdout; otherwise we drive VS Code on macOS via System
-# Events, pressing the close button of the one window whose title matches the
-# basename — if zero or several match, we close nothing rather than risk the
-# wrong window.
-close_editor_window() {
-  local name="$1"
-  local result="" script=""
-  if [ -n "${SAPA_TEARDOWN_CLOSER:-}" ]; then
-    result="$("$SAPA_TEARDOWN_CLOSER" "$name" 2>/dev/null)" || true
-  elif [ "$(uname -s)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
-    # Read the AppleScript into a variable with a plain heredoc, then feed it to
-    # osascript via a here-string. A heredoc placed *inside* $(...) trips a
-    # bash 3.2 (the macOS system bash) parser bug, so keep it out of the
-    # command substitution.
-    IFS= read -r -d '' script <<'APPLESCRIPT' || true
-on run argv
-  set targetName to item 1 of argv
-  try
-    tell application "System Events"
-      if not (exists process "Code") then return "no-editor"
-      tell process "Code"
-        -- Resolve the match to a concrete window index before touching its
-        -- close button. A compound reference like `first button of (item 1 of
-        -- (every window whose name contains X)) whose subrole is Y` makes
-        -- System Events mis-resolve the nested filter ("Invalid index") on any
-        -- window that is not frontmost; indexing first is reliable.
-        set idx to 0
-        repeat with i from 1 to (count of windows)
-          if (name of window i) contains targetName then
-            if idx is 0 then
-              set idx to i
-            else
-              return "no-match" -- several match; close nothing rather than guess
-            end if
-          end if
-        end repeat
-        if idx is 0 then return "no-match"
-        perform action "AXPress" of ¬
-          (first button of window idx whose subrole is "AXCloseButton")
-        return "closed"
-      end tell
-    end tell
-  on error e number n
-    return "error:" & n
-  end try
-end run
-APPLESCRIPT
-    result="$(osascript - "$name" 2>&1 <<<"$script")" || true
-  fi
+# Its stderr is left alone rather than swallowed: a closer explains its own
+# trouble, and `sapa close code` has more to say about a denied close than the
+# status word carries.
+run_closer() {
+  local closer="$1" name="$2" result=""
+  # Unquoted on purpose, so `closer: sapa close code` splits into a command and
+  # its arguments. `set -f` first so that is all it does: a `*` in the value
+  # belongs to the closer, not to whatever sits in the current directory.
+  set -f
+  result="$($closer "$name")" || true
+  set +f
 
   case "$result" in
     ""|closed|no-editor|no-match) : ;;  # done, or a benign no-op — stay quiet
     error:-25211|*"not allowed assistive access"*)
-      printf '%s\n' "sapa teardown: couldn't close the editor window — grant Accessibility to the app running this terminal (e.g. Visual Studio Code) in System Settings > Privacy & Security > Accessibility, then it will close on the next teardown." >&2 ;;
+      printf '%s\n' "sapa teardown: couldn't close the window — grant Accessibility to the app running this terminal in System Settings > Privacy & Security > Accessibility, then it will close on the next teardown." >&2 ;;
     *)
-      printf '%s\n' "sapa teardown: couldn't close the editor window ($result); left it open." >&2 ;;
+      printf '%s\n' "sapa teardown: the closer reported $result; left the window open." >&2 ;;
   esac
 }
 
@@ -136,25 +96,29 @@ fi
 
 branch="$(git -C "$target" rev-parse --abbrev-ref HEAD)"
 
-# Decide now, while the worktree (and its .sapa.yaml) still exists, whether to
-# close the editor window afterwards. Absent or truthy `close_window` = close.
+# Which closer to run, if any. `SAPA_TEARDOWN_CLOSER` wins so the tests can stand
+# one in; otherwise read `closer:` from the personal settings. Settings live at a
+# fixed path in $HOME, not beside the worktree, so this could be read at any
+# point — it sits here next to the basename it will be handed.
 window_name="$(basename "$target")"
-close_enabled=true
-# Resolve sapa-config: prefer PATH, fall back to a sibling of this script, so the
-# opt-out is honoured even when teardown is invoked by an absolute path with an
-# empty PATH.
-sapa_config="$(command -v sapa-config || true)"
-if [ -z "$sapa_config" ] && [ -x "$(dirname "$0")/sapa-config" ]; then
-  sapa_config="$(dirname "$0")/sapa-config"
-fi
-if [ -n "$sapa_config" ]; then
-  cfg_val="$("$sapa_config" -p --start "$target" 2>/dev/null \
-             | sed -nE 's/^[[:space:]]*close_window:[[:space:]]*([^#[:space:]]+).*$/\1/p' \
-             | head -1 \
-             | tr '[:upper:]' '[:lower:]' || true)"
-  case "$cfg_val" in
-    false|no|off|0) close_enabled=false ;;
-  esac
+closer="${SAPA_TEARDOWN_CLOSER:-}"
+if [ -z "$closer" ]; then
+  # Resolve sapa-settings: prefer PATH, fall back to a sibling of this script, so
+  # the closer is found even when teardown is invoked by an absolute path with an
+  # empty PATH.
+  sapa_settings="$(command -v sapa-settings || true)"
+  if [ -z "$sapa_settings" ] && [ -x "$(dirname "$0")/sapa-settings" ]; then
+    sapa_settings="$(dirname "$0")/sapa-settings"
+  fi
+  if [ -n "$sapa_settings" ]; then
+    # A best-effort grep of the printed settings — no YAML parser — mirroring how
+    # the skills read their keys. Quotes are stripped so `closer: "sapa close
+    # code"` works too.
+    closer="$("$sapa_settings" -p 2>/dev/null \
+              | sed -nE 's/^[[:space:]]*closer:[[:space:]]*(.+)$/\1/p' \
+              | head -1 \
+              | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+  fi
 fi
 
 # Guard: never destroy uncommitted work.
@@ -190,6 +154,6 @@ echo "sapa teardown: removed worktree $target and branch $branch"
 
 # Best-effort, last: closing the window kills the terminal running this script
 # when invoked from inside it, which is exactly the intended terminal action.
-if $close_enabled; then
-  close_editor_window "$window_name"
+if [ -n "$closer" ]; then
+  run_closer "$closer" "$window_name"
 fi
