@@ -108,6 +108,7 @@ write_template() {
 #   steps:
 #     - name: review
 #       skill: code-review
+#       model: sonnet  # optional; pins a skill: step to fable, opus, sonnet, or haiku. Defaults to the session model.
 #     - name: test
 #       run: npm test
 YAML
