@@ -52,9 +52,16 @@ write_template() {
   cat > "$1" <<'YAML'
 # Sapa configuration. Every option below is commented out, so this file runs on
 # sapa's built-in defaults as-is. Uncomment a line and change it to override.
+#
+# This file is checked in: it holds the process your team shares. Your own
+# workflow — which editor sapa opens, whether it closes the window afterwards —
+# lives in ~/.sapa/settings.yaml instead. Run `sapa settings init` for that one.
 
 # The branch new streams rebase onto and target with their PR. Default: main.
 # base: main
+
+# The single remote sapa pushes to and fetches from. Default: origin.
+# remote: origin
 
 # Whether `sapa submit` opens the PR ready for review or as a draft.
 # One of `ready` or `draft`. Default: draft.

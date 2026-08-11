@@ -34,8 +34,8 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
 
 - `sapa bootstrap` — clone or `init` a repo into the `.bare` worktree layout
   the rest of sapa expects.
-- `sapa worktree` — spin up a per-branch worktree off `origin/main` and open
-  it in your editor (`$EDITOR`).
+- `sapa worktree` — spin up a per-branch worktree off `origin/main` and open it
+  in your editor, if you have set one in your personal settings.
 - `sapa start` — turn an issue into a worktree ready to plan (derives the branch
   name from the issue title and calls `sapa worktree`). Takes a GitHub number
   (`42`) or a Jira key (`gp-1`); the key is kept in the branch name.
@@ -45,6 +45,10 @@ on your `PATH` with a subcommand per helper (`sapa help` lists them):
   here so the phase skills stay backend-agnostic.
 - `sapa config` — find the project's `.sapa.yaml` by walking up, the way
   `sapa worktree` finds `.bare`.
+- `sapa settings` — print (or `init`) your personal `~/.sapa/settings.yaml`, the
+  per-machine half of the configuration.
+- `sapa close` — close a finished stream's editor window. `sapa close code`
+  handles VS Code on macOS; point `closer:` at it, or at your own.
 - `sapa tmp` — print (creating on first use) a scratch directory scoped to the
   current stream, keyed by its branch the way `sapa status` keys its registry.
   The phase skills write their intermediate files there so two streams in the
@@ -132,6 +136,7 @@ itself so Tab still works.
 
 ```sh
 sapa bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
+sapa settings init   # once per machine: pick your editor and window habits
 sapa start 42     # issue 42 -> worktree, opens your editor
 # open Claude in the new window, then:
 /sapa-flow        # issue 42 -> plan, build, gate, PR, watch, all in one
@@ -140,6 +145,17 @@ sapa start 42     # issue 42 -> worktree, opens your editor
 ```
 
 ## Config
+
+Sapa reads two files, and the split matters. `.sapa.yaml` is checked in and owns
+the process a team shares: the base branch, the tracker, the quality gate.
+`~/.sapa/settings.yaml` is yours alone and owns your workflow: which editor to
+open, whether to close the window afterwards. So a team can agree on one gate
+without anyone having to agree on an editor.
+
+Neither file can reach into the other's keys. A process key in your settings is
+ignored, and a workflow key checked into a project is ignored too. That is the
+guarantee doing the work: your machine cannot quietly weaken the gate everyone
+else runs, and a config someone commits cannot start driving your editor.
 
 Drop a `.sapa.yaml` at the root of any repo. Sapa walks up to find it, so in the
 `.bare` layout it can sit beside `.bare` and cover every worktree at once instead
@@ -185,11 +201,6 @@ default:
     site: verygood-ventures.atlassian.net
     project: GP
   ```
-- `close_window:` — after teardown removes a merged stream's worktree, close the
-  VS Code window that was open on it (default on; set `false` to keep it open).
-  macOS + VS Code only and best-effort: it presses the close button of the one
-  window matching the worktree's basename (closing nothing if zero or several
-  match) and never fails the teardown.
 - `watch:` — settings for `sapa-watch`. `base_behind:` is `protection` (default)
   or `any`. `protection` treats the branch as behind only when GitHub reports
   `mergeStateStatus: BEHIND`, which needs a "require branches up to date"
@@ -244,6 +255,49 @@ gate:
 The gate is the only thing that checks the work — nothing downstream re-verifies
 it — so make the `gate.steps:` count: include a real test, analyze, and review
 step, not a token check.
+
+### Personal settings
+
+Your half lives at `~/.sapa/settings.yaml`, one file per machine rather than one
+per project. `sapa settings init` writes a commented starter; `sapa settings`
+prints the path and `sapa settings -p` its contents. There is no walking up to
+do, so the path is the same wherever you run it from.
+
+Both keys are opt-in, and the key being there is the opt-in. With no settings
+file sapa opens no windows and closes none, which is why a teammate who clones
+your project gets a tool that manages worktrees and leaves their desktop alone.
+
+- `editor:` — a command `sapa worktree` (and so `sapa start`) runs on a new
+  worktree, with the path as its last argument. It splits on spaces, so
+  `editor: code -n` passes the flag through. Omit it and the path is printed
+  instead, to open however you like.
+- `closer:` — a command `sapa teardown` runs once it has removed a merged
+  stream's worktree, with that worktree's basename as its argument, to close the
+  window that was open on it. Omit it and your windows are left alone.
+
+```yaml
+editor: code -n
+closer: sapa close code
+```
+
+`sapa close code` is the one closer that ships with sapa: VS Code on macOS,
+best-effort. It presses the close button of the single window whose title
+contains the worktree's basename, and closes nothing at all if zero or several
+match, so it can never take the wrong window. Nothing about it is privileged.
+Any command that takes a basename and closes a window works the same way, which
+is how a different editor, a tmux session, or a Linux window manager plugs in
+without sapa learning about any of them.
+
+A closer reports back on stdout with one word — `closed`, `no-editor`,
+`no-match`, or `error:<n>` — and teardown stays quiet unless it is something you
+can act on. The close is always best-effort: whatever a closer reports, and
+however it fails, the worktree is already gone and the teardown has succeeded.
+
+Pressing another app's button goes through System Events, which macOS gates
+behind Accessibility permission. Without it the close cannot happen, so teardown
+prints a one-line hint naming the permission rather than failing silently: grant
+Accessibility to whichever app runs your terminal, in System Settings > Privacy
+& Security > Accessibility.
 
 ### The gate record
 

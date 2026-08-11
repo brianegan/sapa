@@ -1,0 +1,123 @@
+#!/bin/bash
+# sapa close — close the editor window a finished stream was open in.
+#
+# This is a *closer*: `sapa teardown` runs one after it removes a merged
+# stream's worktree, handing it that worktree's basename. Closers are opt-in and
+# personal, so point `closer:` in `~/.sapa/settings.yaml` at this one to use it:
+#
+#   closer: sapa close code
+#
+# `code` is the only target that ships with sapa: VS Code on macOS. For any
+# other editor, write your own closer instead. It is any command that takes the
+# basename as its argument and closes the window; sapa reads a status word off
+# its stdout and is otherwise happy to know nothing about it.
+#
+# The window is found by the worktree's basename, which is unique per stream, and
+# closed by pressing that window's own close button — only when exactly one
+# window matches, so it can never close the wrong one.
+#
+# The status word on stdout is that contract:
+#   closed      the window was closed
+#   no-editor   the editor is not running, or this is not a mac
+#   no-match    zero or several windows matched, so nothing was closed
+#   error:<n>   the close failed (-25211 means macOS denied Accessibility)
+#
+# Closing is best-effort by nature, so this exits 0 whatever the status; only a
+# usage error exits non-zero. Set SAPA_OSASCRIPT to stand in for `osascript`
+# (used by the tests, which must never drive a real editor).
+#
+# Usage:
+#   sapa close code <worktree-basename>
+
+set -euo pipefail
+
+usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
+
+# Help wins wherever it appears, so `sapa close code --help` explains itself
+# rather than hunting for a window called `--help`.
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
+
+target="${1:-}"
+name="${2:-}"
+
+if [ -z "$target" ] || [ -z "$name" ]; then
+  echo "sapa close: expected a target and a worktree basename" >&2
+  echo "usage: sapa close code <worktree-basename>" >&2
+  exit 2
+fi
+if [ "$target" != "code" ]; then
+  echo "sapa close: unknown target: $target (only 'code')" >&2
+  echo "usage: sapa close code <worktree-basename>" >&2
+  exit 2
+fi
+if [ $# -gt 2 ]; then
+  echo "sapa close: unexpected argument: $3" >&2
+  exit 2
+fi
+
+# An explicit SAPA_OSASCRIPT is the caller saying what stands in for osascript,
+# so honour it whatever the platform. That is what lets the tests drive this path
+# on a machine that has no osascript at all, which is every CI runner. Without
+# it, driving an editor this way needs a real mac.
+osa="${SAPA_OSASCRIPT:-}"
+if [ -z "$osa" ]; then
+  osa=osascript
+  if [ "$(uname -s)" != "Darwin" ]; then
+    # Nothing here can be driven, which is the same news as the editor not
+    # running: there is no window to close and nothing went wrong.
+    echo "no-editor"
+    exit 0
+  fi
+fi
+if ! command -v "$osa" >/dev/null 2>&1; then
+  echo "no-editor"
+  exit 0
+fi
+
+# Read the AppleScript into a variable with a plain heredoc, then feed it to
+# osascript via a here-string. A heredoc placed *inside* $(...) trips a bash 3.2
+# (the macOS system bash) parser bug, so keep it out of the command
+# substitution.
+IFS= read -r -d '' script <<'APPLESCRIPT' || true
+on run argv
+  set targetName to item 1 of argv
+  try
+    tell application "System Events"
+      if not (exists process "Code") then return "no-editor"
+      tell process "Code"
+        -- Resolve the match to a concrete window index before touching its
+        -- close button. A compound reference like `first button of (item 1 of
+        -- (every window whose name contains X)) whose subrole is Y` makes
+        -- System Events mis-resolve the nested filter ("Invalid index") on any
+        -- window that is not frontmost; indexing first is reliable.
+        set idx to 0
+        repeat with i from 1 to (count of windows)
+          if (name of window i) contains targetName then
+            if idx is 0 then
+              set idx to i
+            else
+              return "no-match" -- several match; close nothing rather than guess
+            end if
+          end if
+        end repeat
+        if idx is 0 then return "no-match"
+        perform action "AXPress" of ¬
+          (first button of window idx whose subrole is "AXCloseButton")
+        return "closed"
+      end tell
+    end tell
+  on error e number n
+    return "error:" & n
+  end try
+end run
+APPLESCRIPT
+
+# An empty result is not a failure: pressing the close button can kill the
+# terminal hosting osascript before it reports back, which only happens once the
+# close has succeeded.
+result="$("$osa" - "$name" 2>&1 <<<"$script")" || true
+printf '%s\n' "${result:-closed}"

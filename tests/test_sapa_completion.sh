@@ -112,7 +112,7 @@ _arguments(){ CALLS+=("$*") }; _alternative(){ CALLS+=("$*") }
 _files(){ CALLS+=("$*") }
 compdef(){ : }; autoload(){ : }; compinit(){ : }
 source "$SRC"
-for c in bootstrap worktree start issue config section watch teardown completion; do
+for c in bootstrap worktree start issue config settings section watch teardown close completion; do
   words=(sapa "$c" ""); CURRENT=3; CALLS=()
   _sapa
   (( ${#CALLS} )) && print -r -- "$c ok" || print -r -- "$c MISSING"

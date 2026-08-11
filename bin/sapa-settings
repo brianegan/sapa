@@ -1,0 +1,129 @@
+#!/bin/bash
+# sapa settings — your personal sapa settings, or create them.
+#
+# sapa reads two files. The project's `.sapa.yaml` is checked in and owns the
+# process a team shares: the base branch, the tracker, the quality gate. This
+# one is yours. `~/.sapa/settings.yaml` is per-machine and owns your workflow,
+# so how you like to work never rides along in the team's config.
+#
+# The two never overlap. Process keys are read only from `.sapa.yaml`, workflow
+# keys only from here. A workflow key checked into a project would drive a
+# teammate's machine, and a process key set here would quietly change the gate
+# the team agreed on.
+#
+# The workflow keys, both opt-in:
+#   editor:  a command `sapa worktree` runs on a new worktree
+#   closer:  a command `sapa teardown` runs to close a finished stream's window
+#
+# With no settings file, sapa opens and closes no windows at all.
+#
+# Unlike `sapa config` there is no walking up to do: the path is always
+# `~/.sapa/settings.yaml`, so a bare call prints it whether or not it exists.
+#
+# Usage:
+#   sapa settings              # print the path to ~/.sapa/settings.yaml
+#   sapa settings -p           # print its contents
+#   sapa settings init         # write a commented settings.yaml
+#   sapa settings init --force # write it even if one already exists
+
+set -euo pipefail
+
+usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
+
+if [ -z "${HOME:-}" ]; then
+  echo "sapa settings: HOME is not set; can't locate ~/.sapa/settings.yaml" >&2
+  exit 1
+fi
+path="$HOME/.sapa/settings.yaml"
+
+# The starter settings: both keys present but commented, each with a note on
+# what it receives, so an untouched file changes nothing and doubles as the menu
+# of what can be turned on.
+write_template() {
+  cat > "$1" <<'YAML'
+# Your personal sapa settings — this machine, your workflow. Every option below
+# is commented out, so this file changes nothing as it stands. Uncomment a line
+# to turn that behaviour on.
+#
+# The project's `.sapa.yaml` is a separate file with a separate job: it is
+# checked in and owns the process your team shares. sapa never reads the keys
+# below from it, and never reads that file's keys from here.
+
+# A command `sapa worktree` (and so `sapa start`) runs on a new worktree, with
+# the worktree path as its last argument. Omit it and sapa prints the path
+# instead of opening anything.
+# editor: code -n
+
+# A command `sapa teardown` runs once a merged stream's worktree is gone, with
+# the worktree's basename as its argument, to close the window that was open on
+# it. `sapa close code` ships with sapa and closes the matching VS Code window
+# on macOS. Omit it and sapa leaves your windows alone.
+# closer: sapa close code
+YAML
+}
+
+cmd_init() {
+  local force=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force) force=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "sapa settings init: unknown argument: $1" >&2; exit 2 ;;
+    esac
+    shift
+  done
+
+  # Never overwrite settings someone has edited without asking. Prompt when
+  # there is a terminal to answer on; refuse otherwise, the same trade `sapa
+  # config init` makes.
+  if [ -f "$path" ] && ! $force; then
+    if [ -t 0 ]; then
+      printf 'This will overwrite your settings at %s\n' "$path" >&2
+      printf 'Overwrite? [y/N] ' >&2
+      local answer
+      read -r answer
+      case "$answer" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "sapa settings init: not overwriting $path" >&2; exit 1 ;;
+      esac
+    else
+      echo "sapa settings init: settings already exist at $path;" \
+           "re-run with --force to overwrite" >&2
+      exit 1
+    fi
+  fi
+
+  mkdir -p "$(dirname "$path")"
+  write_template "$path"
+  echo "$path"
+}
+
+# Subcommand dispatch: `init` creates the settings; anything else reads them.
+if [ "${1:-}" = "init" ]; then
+  shift
+  cmd_init "$@"
+  exit 0
+fi
+
+print_contents=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--print) print_contents=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "sapa settings: unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if ! $print_contents; then
+  echo "$path"
+  exit 0
+fi
+
+if [ -f "$path" ]; then
+  cat "$path"
+  exit 0
+fi
+
+echo "sapa settings: no settings file at $path; run 'sapa settings init' to create one" >&2
+exit 1
