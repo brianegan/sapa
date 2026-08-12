@@ -1,16 +1,52 @@
 # Sapa
 
 Sapa (Filipino for "brook" or "stream") runs a piece of work from a fresh worktree to a
-merged PR. It bootstraps a repo into a worktree layout and spins up a worktree
-per stream, then once the code is written it gates the work, captures the plan
-on the GitHub issue, and ships it as a PR (draft by default).
+merged PR. It bootstraps a repo into a worktree layout, spins up a worktree per
+stream, then gates the work, captures the plan on the issue, and ships it as a PR
+(draft by default).
 
-It is a set of Claude Code skills plus small helper scripts. There is no daemon,
-no binary, and no second remote: everything runs in the Claude session that did
-the work, and it pushes to a single remote (`origin` by default; the name is
-configurable but there is never a second one).
+It is a set of Claude Code skills plus small helper scripts: no daemon, no
+binary, no second remote; everything runs in the session that did the work and
+pushes to a single remote (`origin` by default). See [PRD.md](PRD.md) for the
+full design and rationale.
 
-See [PRD.md](PRD.md) for the full design and rationale.
+## Getting started
+
+Install sapa from a clone, then set up your machine once:
+
+```sh
+bin/sapa install      # link sapa onto PATH, skills into your agents
+sapa settings init    # write a commented ~/.sapa/settings.yaml
+```
+
+The settings file is yours alone: `editor:` opens each new worktree in your
+editor, `closer:` closes its window when the stream merges. Both are opt-in; with
+no settings file sapa manages worktrees and leaves your desktop alone.
+Prerequisites and installer options are under [Install](#install).
+
+Then, once per project:
+
+1. `sapa bootstrap git@github.com:me/proj.git` clones the repo into the `.bare`
+   worktree layout the rest of sapa expects.
+2. `sapa config init` writes a starter `.sapa.yaml`, the project's checked-in
+   process config: base branch, tracker, gate steps, draft vs ready PRs. See
+   [Config](#config).
+3. `sapa start 42` creates a worktree for issue 42 on a branch named for it, and
+   opens it in your editor if `editor:` is set.
+4. Open Claude Code or Codex in the worktree and run `/sapa-flow`. It reads the
+   issue and drives the stream through every phase:
+   - `/sapa-plan` agrees an approach with you and records it on the issue as a
+     comment, with a `Done when:` criterion per task.
+   - `/sapa-build` implements the recorded plan, one task at a time.
+   - `/sapa-gate` rebases onto the base and runs the `gate.steps:` from
+     `.sapa.yaml`: shell commands (test, lint, format) or skills such as
+     `/code-review`, optionally pinned to a model. `max_fix_attempts:` bounds
+     how many fixes it tries before handing the stream back.
+   - `/sapa-submit` pushes and opens the PR, draft or ready per the `pr:` key.
+   - `/sapa-watch` follows the PR: it fixes CI failures, answers or escalates
+     review comments, and keeps the branch rebased when the base moves.
+5. On merge, watch tears the stream down: it removes the worktree and branch,
+   and runs your `closer:` to close the editor window.
 
 ## What's here
 
@@ -18,71 +54,65 @@ See [PRD.md](PRD.md) for the full design and rationale.
 (type `sapa` to filter to just these) and can't wander into another phase, plus
 `sapa-flow` to chain them for the common case:
 
-- `skill/sapa-flow` — drive a stream end to end: plan, build, gate, submit,
-  watch. The daily entry point; the rest are for running a single phase.
-- `skill/sapa-plan` — agree a plan and record it on the issue, then stop.
-- `skill/sapa-build` — read the recorded plan and implement the code and tests.
-- `skill/sapa-gate` — rebase onto the base and run the quality gate, certifying
+- `skill/sapa-flow`: drive a stream end to end (plan, build, gate, submit,
+  watch). The daily entry point; the rest run a single phase.
+- `skill/sapa-plan`: agree a plan and record it on the issue, then stop.
+- `skill/sapa-build`: read the recorded plan and implement the code and tests.
+- `skill/sapa-gate`: rebase onto the base and run the quality gate, certifying
   the branch is green against what will merge.
-- `skill/sapa-submit` — push and open the PR (draft by default), then reconcile
+- `skill/sapa-submit`: push and open the PR (draft by default), then reconcile
   the plan on the issue.
-- `skill/sapa-watch` — monitor the PR (CI, comments, keeping it mergeable) and
+- `skill/sapa-watch`: monitor the PR (CI, comments, keeping it mergeable) and
   tear the stream down when it merges.
 
-The `sapa` command, backing the skills so there's no duplicated logic. One name
-on your `PATH` with a subcommand per helper (`sapa help` lists them):
+The `sapa` command backs the skills so no logic is duplicated. One name on your
+`PATH`, a subcommand per helper (`sapa help` lists them):
 
-- `sapa bootstrap` — clone or `init` a repo into the `.bare` worktree layout
-  the rest of sapa expects.
-- `sapa worktree` — spin up a per-branch worktree off `origin/main` and open it
+- `sapa bootstrap`: clone or `init` a repo into the `.bare` worktree layout.
+- `sapa worktree`: spin up a per-branch worktree off `origin/main` and open it
   in your editor, if you have set one in your personal settings.
-- `sapa start` — turn an issue into a worktree ready to plan (derives the branch
+- `sapa start`: turn an issue into a worktree ready to plan (derives the branch
   name from the issue title and calls `sapa worktree`). Takes a GitHub number
   (`42`) or a Jira key (`gp-1`); the key is kept in the branch name.
-- `sapa issue` — derive the issue identity from the branch (`sapa issue key`) and
+- `sapa issue`: derive the issue identity from the branch (`sapa issue key`) and
   record or read the plan comment (`sapa issue plan-comment`), against GitHub
-  (`gh`) or Jira (`acli`) per the `tracker` config. The gh-vs-acli branch lives
+  (`gh`) or Jira (`acli`) per the `tracker` config. The gh-vs-acli split lives
   here so the phase skills stay backend-agnostic.
-- `sapa config` — find the project's `.sapa.yaml` by walking up, the way
+- `sapa config`: find the project's `.sapa.yaml` by walking up, the way
   `sapa worktree` finds `.bare`.
-- `sapa settings` — print (or `init`) your personal `~/.sapa/settings.yaml`, the
+- `sapa settings`: print (or `init`) your personal `~/.sapa/settings.yaml`, the
   per-machine half of the configuration.
-- `sapa close` — close a finished stream's editor window. `sapa close code`
+- `sapa close`: close a finished stream's editor window. `sapa close code`
   handles VS Code on macOS; point `closer:` at it, or at your own.
-- `sapa tmp` — print (creating on first use) a scratch directory scoped to the
-  current stream, keyed by its branch the way `sapa status` keys its registry.
-  The phase skills write their intermediate files there so two streams in the
-  same phase never clobber each other's scratch.
-- `sapa section` — maintain a machine-managed section of a PR body or issue
+- `sapa tmp`: print (creating on first use) a scratch directory scoped to the
+  current stream. Phase skills write intermediate files there so parallel
+  streams never clobber each other.
+- `sapa section`: maintain a machine-managed section of a PR body or issue
   without clobbering text a human has edited or locked.
-- `sapa status` — record the current stream's run-state and lifecycle stage to a
-  per-stream JSON file, and read the stage back with `--report`. A window switcher
-  reads the file to badge each window (see [Window status](#window-status));
-  `sapa-flow` reads the stage to resume a stream at the phase it left off in.
-- `sapa gate` — walk the configured `gate.steps:` in order, run each `run:` step
-  with `SAPA_BASE` and `SAPA_CHANGED_FILES` set, materialize the plan comment for
-  the `skill:` steps, and emit one structured line per result. It stops when it
-  reaches a `skill:` step (exit 4), because invoking a skill needs the agent; the
-  `sapa-gate` skill invokes it and resumes with `sapa gate --after <name>`,
-  reporting that step's outcome with `--result`/`--summary`. The walk writes a
-  record of itself, and `sapa gate --report` renders that record as the PR's
-  `## Gates` section (see [The gate record](#the-gate-record)).
-- `sapa watch` — poll the current branch's PR and emit one structured line per
+- `sapa status`: record the stream's run-state and lifecycle stage to a
+  per-stream JSON file, and read the stage back with `--report`. A window
+  switcher badges each window from it (see [Window status](#window-status));
+  `sapa-flow` reads it to resume a stream at the phase it left off in.
+- `sapa gate`: walk the configured `gate.steps:` in order (`run:` steps get
+  `SAPA_BASE` and `SAPA_CHANGED_FILES`; `skill:` steps get the plan comment).
+  It stops at a `skill:` step (exit 4), since invoking a skill needs the agent;
+  `sapa-gate` resumes with `sapa gate --after <name>` and reports the outcome
+  with `--result`/`--summary`. `sapa gate --report` renders the walk's record as
+  the PR's `## Gates` section (see [The gate record](#the-gate-record)).
+- `sapa watch`: poll the current branch's PR and emit one structured line per
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
-  `merged`, `closed`), guarding empty or failed fetches and deduping against the
-  last poll. The `sapa-watch` skill runs it and reasons about each event.
-- `sapa teardown` — remove a merged stream's worktree and local branch,
-  refusing if there are uncommitted changes, then close its VS Code window.
+  `merged`, `closed`). The `sapa-watch` skill runs it and reasons about each
+  event.
+- `sapa teardown`: remove a merged stream's worktree and local branch, refusing
+  if there are uncommitted changes, then close its editor window.
 
-Plus `.sapa.yaml` (Sapa's own gate config — it gates itself) and `tests/`.
+Plus `.sapa.yaml` (Sapa's own gate config; it gates itself) and `tests/`.
 
 ## Install
 
-Needs `git`, `gh` (authenticated), `python3`, and PyYAML. Everything but PyYAML
-you already have if you use GitHub from a terminal on macOS; PyYAML ships with
-Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Only
-`sapa gate` needs it, to read the `gate:` map. Jira projects also need
-`acli`.
+Needs `git`, `gh` (authenticated), `python3`, and PyYAML. PyYAML ships with
+Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise; only
+`sapa gate` needs it, to read the `gate:` map. Jira projects also need `acli`.
 
 Clone the repo, then run the installer from it:
 
@@ -92,19 +122,15 @@ sapa uninstall      # remove those symlinks
 ```
 
 It symlinks the `sapa` command into `~/.local/bin` and the `skill/` directories
-into every coding agent it finds — Claude Code (`~/.claude/skills`) and Codex
-(`~/.codex/skills`), which read the same `SKILL.md` format. The other helpers
-stay in the clone and `sapa` resolves back to them, so only one name lands on
-your `PATH`. The links point into the clone you run it from, so editing the
-source updates the installed copy; develop sapa from your `main` checkout so the
-links track merged code. Re-running is safe (and it clears any links left by the
-older one-command-per-helper layout).
+into every coding agent it finds: Claude Code (`~/.claude/skills`) and Codex
+(`~/.codex/skills`), which read the same `SKILL.md` format. The links point into
+the clone, so editing the source updates the installed copy; develop sapa from
+your `main` checkout. Re-running is safe.
 
 When Claude Code is a target, install also wires three run-state hooks into
-`~/.claude/settings.json` for the [window status](#window-status) feature. This
-is the one config file sapa edits (the `PATH` and completion hints stay hints); it
-touches only its own entries, leaving any hooks you already have, and `sapa
-uninstall` removes exactly them.
+`~/.claude/settings.json` for the [window status](#window-status) feature: the
+one config file sapa edits, touching only its own entries, and `sapa uninstall`
+removes exactly them.
 
 Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 `~/.local/bin`; the installer prints a hint if it isn't on your `PATH`), and
@@ -112,88 +138,62 @@ Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 instead of auto-detecting.
 
 GitHub access uses `gh`. `npx skills add <repo>` is an alternative for the skills
-half only — it can't put the `sapa` command on your `PATH`.
+half only; it can't put the `sapa` command on your `PATH`.
 
 ### Shell completion (optional)
 
-For zsh Tab-completion of subcommands, run this once — it appends the enable line
-to your `~/.zshrc`:
+For zsh Tab-completion of subcommands and their arguments, run this once (it
+appends the enable line to your `~/.zshrc`):
 
 ```sh
 echo 'eval "$(sapa completion zsh)"' >> ~/.zshrc
 ```
 
-sapa never edits your shell config for you — the installer just prints this same
-line for you to copy, paste, and run, the way it hints about `PATH`.
-
-Completion covers each subcommand's arguments too — for example `sapa teardown`
-completes worktree directories and `sapa config --start` completes directories.
-The enable line normally belongs after `compinit` in your `~/.zshrc` (oh-my-zsh
-runs `compinit` for you); if it lands before, the script initialises completion
-itself so Tab still works.
-
-## Flow
-
-```sh
-sapa bootstrap git@github.com:me/proj.git   # once per repo: set up the worktree layout
-sapa settings init   # once per machine: pick your editor and window habits
-sapa start 42     # issue 42 -> worktree, opens your editor
-# open Claude in the new window, then:
-/sapa-flow        # issue 42 -> plan, build, gate, PR, watch, all in one
-# or run a single phase: /sapa-plan, /sapa-build, /sapa-gate, /sapa-submit, /sapa-watch
-# on merge, watch removes the worktree for you
-```
+sapa never edits your shell config for you; the installer prints this same line
+as a hint. It normally belongs after `compinit` (oh-my-zsh runs it for you);
+placed earlier, the script initializes completion itself so Tab still works.
 
 ## Config
 
-Sapa reads two files, and the split matters. `.sapa.yaml` is checked in and owns
-the process a team shares: the base branch, the tracker, the quality gate.
-`~/.sapa/settings.yaml` is yours alone and owns your workflow: which editor to
-open, whether to close the window afterwards. So a team can agree on one gate
-without anyone having to agree on an editor.
-
-Neither file can reach into the other's keys. A process key in your settings is
-ignored, and a workflow key checked into a project is ignored too. That is the
-guarantee doing the work: your machine cannot quietly weaken the gate everyone
-else runs, and a config someone commits cannot start driving your editor.
+Sapa reads two files. `.sapa.yaml` is checked in and owns the process a team
+shares: the base branch, the tracker, the quality gate. `~/.sapa/settings.yaml`
+is yours alone and owns your workflow: which editor to open, whether to close the
+window afterwards. Neither file can reach into the other's keys: your machine
+cannot quietly weaken the gate everyone else runs, and a config someone commits
+cannot start driving your editor.
 
 Drop a `.sapa.yaml` at the root of any repo. Sapa walks up to find it, so in the
-`.bare` layout it can sit beside `.bare` and cover every worktree at once instead
-of being copied into each one. The walk locates the config and nothing more:
-`sapa gate` runs its steps in the worktree you invoked it from, not in the
-directory the config was found in.
+`.bare` layout it can sit beside `.bare` and cover every worktree at once. The
+walk only locates the config: `sapa gate` runs its steps in the worktree you
+invoked it from.
 
 A few optional top-level keys tune the flow, each with a backward-compatible
 default:
 
-- `base:` — the branch PRs target (default `main`). `sapa-gate` rebases onto it
+- `base:`: the branch PRs target (default `main`). `sapa-gate` rebases onto it
   before running the checks.
-- `remote:` — the single remote to push to (default `origin`). Names your one
-  remote; it never adds a second.
-- `pr:` — `draft` or `ready`, the state new PRs open in (default `draft`). Solo
+- `remote:`: the single remote to push to (default `origin`).
+- `pr:`: `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
-- `plan:` — a skill `/sapa-plan` invokes to run the planning discussion (for
+- `plan:`: a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grilling`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.
-- `build:` — a skill `/sapa-build` invokes to shape the implementation (for
-  example `/tdd` to build test-first). It is invoked once, before the first task,
-  because a skill's instructions stay loaded for the rest of the session. Omit it
-  to build as `/sapa-build` describes. The skill shapes how each task reaches
-  green, never whether it does: it can tighten sapa's rule and cannot loosen it,
-  and it never re-scopes, merges, or reorders the recorded tasks.
-- `writing_style:` — a skill sapa runs as a final pass over the free prose it
-  writes: the plan comment, the PR body, and its replies to review comments (for
-  example `/humanizer`). Omit it (the default) to write plainly. It shapes prose
-  only, never the structured parts — the plan's task list and `Done when:` lines,
-  the PR title, and the gate record stay as written.
-- `tracker:` — the issue backend, `github` (default) or `jira`. On `github`, sapa
+- `build:`: a skill `/sapa-build` invokes once, before the first task, to shape
+  the implementation (for example `/tdd` to build test-first). It can tighten
+  sapa's rules, never loosen them, and never re-scopes, merges, or reorders the
+  recorded tasks.
+- `writing_style:`: a skill sapa runs as a final pass over the free prose it
+  writes (plan comment, PR body, review replies; for example `/humanizer`). It
+  shapes prose only: the task list, `Done when:` lines, PR title, and gate
+  record stay as written.
+- `tracker:`: the issue backend, `github` (default) or `jira`. On `github`, sapa
   reads issues and records the plan through `gh`, and PRs link the issue with
-  `Closes #N`. On `jira`, it reads issues and records the plan through the
-  Atlassian CLI (`acli`); PRs still live on GitHub and link the issue by URL. The
-  Jira key is kept in the branch (`gp-1-…`), so Jira's dev panel back-links the PR.
-- `jira:` — Jira settings, used only when `tracker: jira`. `site:` is the Jira
-  host, used to build the PR's issue link; `project:` is optional and lets a bare
-  `sapa start 1` expand to that project's key (`GP-1`).
+  `Closes #N`. On `jira` it uses the Atlassian CLI (`acli`); PRs still live on
+  GitHub and link the issue by URL. The Jira key is kept in the branch
+  (`gp-1-…`), so Jira's dev panel back-links the PR.
+- `jira:`: Jira settings, used only when `tracker: jira`. `site:` is the Jira
+  host, used to build the PR's issue link; `project:` is optional and lets a
+  bare `sapa start 1` expand to that project's key (`GP-1`).
 
   ```yaml
   tracker: jira
@@ -201,15 +201,13 @@ default:
     site: verygood-ventures.atlassian.net
     project: GP
   ```
-- `watch:` — settings for `sapa-watch`. `base_behind:` is `protection` (default)
-  or `any`. `protection` treats the branch as behind only when GitHub reports
-  `mergeStateStatus: BEHIND`, which needs a "require branches up to date"
-  protection rule. `any` also reacts when the base has genuinely moved ahead
-  without that rule, keeping the branch rebased at the cost of a re-gate on every
-  merge to the base. `max_ci_fix_attempts:` (default 3) bounds the CI autofix
-  loop: after that many failed fixes for one failure streak, `sapa-watch` stops
-  and escalates instead of pushing another guess. The count resets whenever CI
-  goes green again.
+- `watch:`: settings for `sapa-watch`. `base_behind:` is `protection` (default)
+  or `any`: `protection` reacts only when GitHub reports `mergeStateStatus:
+  BEHIND`, which needs a "require branches up to date" rule, while `any` also
+  reacts when the base has moved ahead without that rule, at the cost of a
+  re-gate on every merge to the base. `max_ci_fix_attempts:` (default 3) bounds
+  the CI autofix loop before `sapa-watch` stops and escalates; the count resets
+  whenever CI goes green.
 
   ```yaml
   watch:
@@ -219,19 +217,19 @@ default:
 
 `gate:` is a map. Its `steps:` list is the gate itself, and `max_fix_attempts:`
 (default 3) bounds `/sapa-gate`'s autofix loop: after that many fixes applied and
-re-run for one failing gate, it stops and hands the stream back instead of guessing
-again, because repeated failed fixes usually mean the failure is deeper than the
-patch. `0` never autofixes. A run that reaches green ends the count. Unlike watch's
-`max_ci_fix_attempts`, only sapa's own guesses spend from it: a fix you dictated
-after it stopped to ask reruns on a fresh budget.
+re-run for one failing gate, it stops and hands the stream back instead of
+guessing again (repeated failures usually run deeper than the patch). `0` never
+autofixes, and a green run ends the count. Unlike watch's `max_ci_fix_attempts`,
+only sapa's own guesses spend from it: a fix you dictated after it stopped to ask
+reruns on a fresh budget.
 
 Each step under `gate.steps:` is a shell command (`run:`, which may carry a
-version-manager prefix) or a skill (`skill:`). A step may also carry `model:`,
-which pins that step to a model (`fable`, `opus`, `sonnet`, `haiku`) — meaningful
-for `skill:` steps, which then run in a sub-agent pinned to it; absent, the step
-inherits the session model. The recommended posture: run sessions on Opus and
-pin the review step to Fable, so the strongest model's judgment lands on the one
-step that is bounded, token-light, and needs no mid-task conversation.
+version-manager prefix) or a skill (`skill:`). A step may also carry `model:` to
+pin it to a model (`fable`, `opus`, `sonnet`, `haiku`): `skill:` steps then run
+in a sub-agent on that model, while unpinned steps inherit the session model. The
+recommended posture: run sessions on Opus and pin the review step to Fable, so
+the strongest model's judgment lands on the one step that is bounded,
+token-light, and needs no mid-task conversation.
 
 ```yaml
 base: main
@@ -252,27 +250,26 @@ gate:
       run: fvm flutter test
 ```
 
-The gate is the only thing that checks the work — nothing downstream re-verifies
-it — so make the `gate.steps:` count: include a real test, analyze, and review
-step, not a token check.
+The gate is the only thing that checks the work, and nothing downstream
+re-verifies it, so make the `gate.steps:` count: include a real test, analyze,
+and review step, not a token check.
 
 ### Personal settings
 
-Your half lives at `~/.sapa/settings.yaml`, one file per machine rather than one
-per project. `sapa settings init` writes a commented starter; `sapa settings`
-prints the path and `sapa settings -p` its contents. There is no walking up to
-do, so the path is the same wherever you run it from.
+Your half lives at `~/.sapa/settings.yaml`, one file per machine. `sapa settings
+init` writes a commented starter; `sapa settings` prints the path and
+`sapa settings -p` its contents.
 
 Both keys are opt-in, and the key being there is the opt-in. With no settings
-file sapa opens no windows and closes none, which is why a teammate who clones
-your project gets a tool that manages worktrees and leaves their desktop alone.
+file sapa opens no windows and closes none, so a teammate who clones your project
+gets a tool that manages worktrees and leaves their desktop alone.
 
-- `editor:` — a command `sapa worktree` (and so `sapa start`) runs on a new
+- `editor:`: a command `sapa worktree` (and so `sapa start`) runs on a new
   worktree, with the path as its last argument. It splits on spaces, so
   `editor: code -n` passes the flag through. Omit it and the path is printed
-  instead, to open however you like.
-- `closer:` — a command `sapa teardown` runs once it has removed a merged
-  stream's worktree, with that worktree's basename as its argument, to close the
+  instead.
+- `closer:`: a command `sapa teardown` runs once it has removed a merged
+  stream's worktree, with the worktree's basename as its argument, to close the
   window that was open on it. Omit it and your windows are left alone.
 
 ```yaml
@@ -283,32 +280,25 @@ closer: sapa close code
 `sapa close code` is the one closer that ships with sapa: VS Code on macOS,
 best-effort. It presses the close button of the single window whose title
 contains the worktree's basename, and closes nothing at all if zero or several
-match, so it can never take the wrong window. Nothing about it is privileged.
-Any command that takes a basename and closes a window works the same way, which
-is how a different editor, a tmux session, or a Linux window manager plugs in
-without sapa learning about any of them.
+match, so it can never take the wrong window. Any command that takes a basename
+and closes a window plugs in the same way: a different editor, a tmux session, a
+Linux window manager.
 
-A closer reports back on stdout with one word — `closed`, `no-editor`,
-`no-match`, or `error:<n>` — and teardown stays quiet unless it is something you
-can act on. The close is always best-effort: whatever a closer reports, and
-however it fails, the worktree is already gone and the teardown has succeeded.
-
-Pressing another app's button goes through System Events, which macOS gates
-behind Accessibility permission. Without it the close cannot happen, so teardown
-prints a one-line hint naming the permission rather than failing silently: grant
-Accessibility to whichever app runs your terminal, in System Settings > Privacy
-& Security > Accessibility.
+A closer reports one word on stdout: `closed`, `no-editor`, `no-match`, or
+`error:<n>`. The close is always best-effort: whatever it reports, the worktree
+is already gone and the teardown has succeeded. Pressing another app's button
+goes through System Events, which macOS gates behind Accessibility permission;
+teardown prints a one-line hint naming it (grant it to your terminal app in
+System Settings > Privacy & Security > Accessibility) rather than failing
+silently.
 
 ### The gate record
 
-That last paragraph used to be the whole enforcement mechanism: advice in a README,
-against a "the branch is green" that was a sentence in a chat log and gone with the
-session. So the gate writes down what it did, and the PR publishes it.
-
-As `sapa gate` walks, it appends to `$(sapa tmp)/gate-record.json` — per step the
-name, kind, command or skill, model pin, result, duration, and a tail of its output,
-and per run the head and base SHAs it gated plus whether any step was given the
-recorded plan as its spec source. `sapa-submit` then puts a summary on the PR:
+The gate writes down what it did, and the PR publishes it. As `sapa gate` walks,
+it appends to `$(sapa tmp)/gate-record.json`: per step the name, kind, command or
+skill, model pin, result, duration, and a tail of its output, and per run the
+head and base SHAs it gated plus whether any step was given the recorded plan as
+its spec source. `sapa-submit` then puts a summary on the PR:
 
 ```
 ## Gates
@@ -321,25 +311,21 @@ Gated `def5678` against `origin/main@abc1234`.
 Reviewed against the plan recorded on the issue.
 ```
 
-A gate of one `format` step renders as one bullet and reads as thin, and a PR where
-nothing was given the plan says so. That is deliberate, and it is the whole design:
-disclosure, not enforcement. Sapa will not refuse to certify a weak gate — that
-would make adopting it on someone else's repo a fight, and it is not sapa's call —
-so it puts the truth where the reviewer is and lets them judge. A good gate pays
-nothing for this.
+A gate of one `format` step renders as one bullet and reads as thin, and a PR
+where nothing was given the plan says so. That is the design: disclosure, not
+enforcement. Sapa will not refuse to certify a weak gate; it puts the truth where
+the reviewer is and lets them judge.
 
-Two things the section is careful about. A `run:` step's result is an exit code sapa
-watched, while a `skill:` step's is what the agent reported when it resumed the
-walk, and skill bullets say `agent-reported` rather than letting the two read as the
-same kind of evidence. And the spec-source line states what sapa observed rather
-than reaching a verdict, because sapa cannot know whether a given step is a spec
-review. Names only, no commands: the config is checked in and shows up in the diff.
+The section also distinguishes two kinds of evidence: a `run:` step's result is
+an exit code sapa watched, while a `skill:` step's is what the agent reported and
+says `agent-reported`. The spec-source line states what sapa observed, because
+sapa cannot know whether a given step is a spec review. Names only, no commands:
+the config is checked in and shows up in the diff.
 
 The record lives in the stream's scratch directory and does not survive a reboot.
 Submitting without a fresh gate is legitimate, so `sapa gate --report` says no
-record was found rather than rebuilding a plausible list from the config. It also
-compares the recorded head against the current one and flags a gate that ran on a
-different commit. Run it yourself any time: `sapa gate --report`.
+record was found rather than inventing one, and it flags a gate whose recorded
+head is not the current commit. Run it yourself any time: `sapa gate --report`.
 
 ### Changed-package scoping in a monorepo
 
@@ -347,14 +333,12 @@ different commit. Run it yourself any time: `sapa gate --report`.
 against what will merge. It hands that to every `run:` step as two environment
 variables:
 
-- `SAPA_BASE` — the branch the PR targets (the config `base`).
-- `SAPA_CHANGED_FILES` — the files this branch changed versus the merge-base,
+- `SAPA_BASE`: the branch the PR targets (the config `base`).
+- `SAPA_CHANGED_FILES`: the files this branch changed versus the merge-base,
   newline-separated.
 
-That is the whole contract. Sapa does not discover packages or own your version
-manager — those vary too much per repo, and the `run:` prefix (`fvm dart …`)
-already covers the toolchain. Your script maps the changed files to packages and
-decides what to gate. In a workspace with many packages, gate only the ones the
+That is the whole contract. Your script maps the changed files to packages and
+decides what to gate: in a workspace with many packages, gate only the ones the
 branch touched, and fall back to gating everything when the change is
 cross-cutting (root `pubspec.yaml`, CI config, shared tooling):
 
@@ -402,91 +386,78 @@ gate:
 
 ## Window status
 
-Sapa runs one editor window per stream, so with three to five streams going the
-question is always "which window can I switch to right now?" `sapa status` answers
-it for a window switcher: it writes a tiny JSON file per stream that a switcher
-reads to badge each window as running, at rest, or waiting.
+Sapa runs one editor window per stream, so with several streams going the
+question is always "which window can I switch to right now?" `sapa status`
+answers it for a window switcher: it writes a tiny JSON file per stream that a
+switcher reads to badge each window as running, at rest, or waiting.
 
-Two orthogonal fields, each written by whoever knows it:
+Two independent fields, each written by whoever knows it:
 
-- `state` — the run-state, `busy` | `idle` | `needs-you`, written by the Claude
+- `state`: the run-state, `busy` | `idle` | `needs-you`, written by the Claude
   Code hooks `sapa install` wires (`UserPromptSubmit → busy`, `Notification →
-  needs-you`, `Stop → idle`). This is the "running vs at rest" signal.
-- `stage` — the lifecycle phase, `plan` | `build` | `gate` | `submit` | `watch`,
+  needs-you`, `Stop → idle`).
+- `stage`: the lifecycle phase, `plan` | `build` | `gate` | `submit` | `watch`,
   written by each phase skill as its first act.
 
-They are written independently and merged, so the frequent run-state hook and the
-once-per-phase stage write never clobber each other.
+`stage` is read back inside sapa too: `sapa status --report` prints it (writing
+nothing), and that is how `sapa-flow` re-enters a stream at the phase it left off
+in. A caller that changes the answer writes the stage it wants resumed, which is
+why `sapa-flow` sets it back to `gate` after an interruption that edited the
+working tree. An unrecorded stage prints nothing and exits 0: a fresh stream
+starts at the first phase. `sapa status` resolves the stream from the `.bare`
+project root, so the global hooks do nothing outside sapa sessions. On merge,
+`sapa teardown` clears the file.
 
-`stage` is read back inside sapa too, so it is more than a badge. `sapa status
---report` prints it and writes nothing, and that is how `sapa-flow` re-enters a
-stream at the phase it left off in rather than starting over at plan, even in a
-session that no longer remembers where it was. So the field means "where this
-stream picks up": a caller that changes the answer writes the stage it wants
-resumed, which is why `sapa-flow` sets it back to `gate` after an interruption
-that edited the working tree. An unrecorded stage prints nothing and exits 0,
-which reads as a fresh stream that starts at the first phase. `sapa status` self-guards: it
-resolves the stream by walking up for the `.bare` project root, so the global hooks
-do nothing in any non-sapa session. On merge, `sapa teardown` clears the file.
-
-The registry is one file per stream — so each window only writes its own, and
-teardown removes just that one — under `${SAPA_STATUS_DIR:-~/.sapa/status}/`, keyed
-by the worktree basename (which equals the branch, and is the token an editor puts
-in its window title — the join a switcher matches windows on):
+The registry is one file per stream under `${SAPA_STATUS_DIR:-~/.sapa/status}/`,
+keyed by the worktree basename (which equals the branch, and is the token an
+editor puts in its window title, the join a switcher matches windows on):
 
 ```json
 { "branch": "51-combine-jump-sapa", "stage": "gate", "state": "busy",
   "updated": "2026-07-07T22:48:00Z" }
 ```
 
-The consumer side — reading this registry and rendering a per-window badge — lives
-in the switcher. [Jump](https://github.com/brianegan/jump) is the reference
-consumer; any tool that can match a window to a stream by title and read the JSON
-can use it.
+Reading this registry and rendering the badge lives in the switcher.
+[Jump](https://github.com/brianegan/jump) is the reference consumer; any tool
+that can match a window to a stream by title and read the JSON can use it.
 
 ## Prior art
 
 Sapa is not the first tool to gate AI-written code or to run agents in parallel
-worktrees. It is a deliberate set of opposite choices from the tools that do.
+worktrees. It makes the opposite choices from the tools that do.
 
 - [no-mistakes](https://github.com/kunchenguid/no-mistakes) is the closest in
-  spirit and the exact inverse in architecture — the tool sapa was built in
+  spirit and the exact inverse in architecture, the tool sapa was built in
   reaction to (see the [Problem Statement](PRD.md)). It runs the same rough
   pipeline (gate, ship, watch CI) but puts a git proxy in front of `origin`,
-  gates in a disposable worktree, runs the gate as a background daemon, and
-  overwrites the PR body on every push. Sapa keeps one remote, gates in the live
-  tree in the foreground where you can cancel and rerun, and locks the PR body
-  the moment you touch it.
+  gates in a disposable worktree as a background daemon, and overwrites the PR
+  body on every push. Sapa keeps one remote, gates in the live tree in the
+  foreground, and locks the PR body the moment you touch it.
 - [Orca](https://github.com/stablyai/orca) and [Composio Agent
   Orchestrator](https://github.com/ComposioHQ/agent-orchestrator) are
-  parallel-agent cockpits — a desktop IDE and a daemon-plus-dashboard supervisor
-  — that run many agents in isolated worktrees and surface their PRs. They
-  overlap sapa's worktree-per-stream half and stop before the autonomous
-  gate-ship-watch: CI fixes are a manual button or a nudge to the agent, review
-  comments are shown but not addressed, and nothing is written back to the issue.
-  Sapa has no daemon and no dashboard; concurrency is one editor window per
-  stream, and closing the window ends that stream's watch.
+  parallel-agent cockpits that run many agents in isolated worktrees and surface
+  their PRs, but stop before the autonomous gate-ship-watch: CI fixes are manual,
+  review comments are shown but not addressed, and nothing is written back to
+  the issue. Sapa has no daemon and no dashboard; concurrency is one editor
+  window per stream, and closing the window ends that stream's watch.
 
 Three things sapa does that none of them do:
 
-1. **It owns the prose without clobbering yours.** The PR body has a
-   machine-managed section that locks the instant you edit it, and the agreed
-   plan lives as a managed comment on the GitHub issue that reconciles when what
-   shipped diverges from what was planned. The others either overwrite your
-   description or never write one, and none record the plan on the issue.
-2. **It triages comments on two axes.** By author — your own comments come back
-   to you in the agent chat, a colleague's are answered on GitHub with a "Sapa
-   Workflow, on your behalf" line — and by substance, so mechanical comments are
-   fixed and pushed while subjective ones are escalated to you. The others
-   classify bot-versus-human at most.
-3. **It runs inside the session that wrote the code.** No proxy, no daemon, no
-   supervisor, one remote, gate in your live tree. The OS owns process lifecycle,
-   so there is no hidden state to reconcile and no single supervisor to become a
-   bottleneck across streams.
+1. It owns the prose without clobbering yours. The PR body has a machine-managed
+   section that locks the instant you edit it, and the agreed plan lives as a
+   managed comment on the issue that reconciles when what shipped diverges from
+   what was planned.
+2. It triages comments by author (your own come back to you in the agent chat, a
+   colleague's are answered on GitHub with a "Sapa Workflow, on your behalf"
+   line) and by substance (mechanical comments are fixed and pushed, subjective
+   ones escalated).
+3. It runs inside the session that wrote the code: no proxy, no daemon, one
+   remote, gate in your live tree, so there is no hidden state to reconcile and
+   no supervisor to become a bottleneck.
 
-One honest caveat: no-mistakes already fixes CI failures and rebases a moved base
-on its own, so post-PR autopilot itself is not new. What is new is doing it from
-inside your session with no second remote, plus the comment triage and the
+One honest caveat: no-mistakes already fixes CI failures and rebases a moved
+base on its own, so post-PR autopilot itself is not new. What is new is doing it
+from inside your session with no second remote, plus the comment triage and the
 issue-plan and PR-body ownership it lacks.
 
 ## Test
