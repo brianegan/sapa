@@ -10,7 +10,7 @@ binary, no second remote; everything runs in the session that did the work and
 pushes to a single remote (`origin` by default). See [PRD.md](PRD.md) for the
 full design and rationale.
 
-## Getting started
+## Quick start
 
 Needs `git`, `gh` (authenticated), and `python3` with PyYAML. Install sapa from
 a clone, then set up your machine once:
@@ -25,7 +25,9 @@ editor, `closer:` closes its window when the stream merges. Both are opt-in; wit
 no settings file sapa manages worktrees and leaves your desktop alone.
 Prerequisites and installer options are under [Install](#install).
 
-Then, once per project:
+### Project setup
+
+Once per project:
 
 1. `sapa bootstrap git@github.com:me/proj.git` clones the repo into the `.bare`
    worktree layout the rest of sapa expects.
@@ -34,37 +36,30 @@ Then, once per project:
    [Config](#config).
 3. `sapa start 42` creates a worktree for issue 42 on a branch named for it, and
    opens it in your editor if `editor:` is set.
-4. Open Claude Code or Codex in the worktree and run `/sapa-flow`. It reads the
-   issue and drives the stream through every phase:
-   - `/sapa-plan` agrees an approach with you and records it on the issue as a
-     comment, with a `Done when:` criterion per task.
-   - `/sapa-build` implements the recorded plan, one task at a time.
-   - `/sapa-gate` rebases onto the base and runs the `gate.steps:` from
-     `.sapa.yaml`: shell commands (test, lint, format) or skills such as
-     `/code-review`, optionally pinned to a model. `max_fix_attempts:` bounds
-     how many fixes it tries before handing the stream back.
-   - `/sapa-submit` pushes and opens the PR, draft or ready per the `pr:` key.
-   - `/sapa-watch` follows the PR: it fixes CI failures, answers or escalates
-     review comments, and keeps the branch rebased when the base moves.
-5. On merge, watch tears the stream down: it removes the worktree and branch,
-   and runs your `closer:` to close the editor window.
+4. Open Claude Code or Codex in the worktree, if your editor has not already.
+
+### The flow
+
+Run `/sapa-flow` in the agent. It reads the issue and drives the stream through
+every phase:
+
+- `/sapa-plan` agrees an approach with you and records it on the issue as a
+  comment, with a `Done when:` criterion per task.
+- `/sapa-build` implements the recorded plan, one task at a time.
+- `/sapa-gate` rebases onto the base and runs the `gate.steps:` from
+  `.sapa.yaml`: shell commands (test, lint, format) or skills such as
+  `/code-review`, optionally pinned to a model. `max_fix_attempts:` bounds
+  how many fixes it tries before handing the stream back.
+- `/sapa-submit` pushes and opens the PR, draft or ready per the `pr:` key.
+- `/sapa-watch` follows the PR: it fixes CI failures, answers or escalates
+  review comments, and keeps the branch rebased when the base moves.
+
+On merge, watch tears the stream down: it removes the worktree and branch, and
+runs your `closer:` to close the editor window.
 
 ## What's here
 
-`/sapa-*` skills, one per phase, so each shows up on its own in the `/` menu
-(type `sapa` to filter to just these) and can't wander into another phase, plus
-`sapa-flow` to chain them for the common case:
-
-- `skill/sapa-flow`: drive a stream end to end (plan, build, gate, submit,
-  watch). The daily entry point; the rest run a single phase.
-- `skill/sapa-plan`: agree a plan and record it on the issue, then stop.
-- `skill/sapa-build`: read the recorded plan and implement the code and tests.
-- `skill/sapa-gate`: rebase onto the base and run the quality gate, certifying
-  the branch is green against what will merge.
-- `skill/sapa-submit`: push and open the PR (draft by default), then reconcile
-  the plan on the issue.
-- `skill/sapa-watch`: monitor the PR (CI, comments, keeping it mergeable) and
-  tear the stream down when it merges.
+### CLI
 
 The `sapa` command backs the skills so no logic is duplicated. One name on your
 `PATH`, a subcommand per helper (`sapa help` lists them):
@@ -106,6 +101,23 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
   event.
 - `sapa teardown`: remove a merged stream's worktree and local branch, refusing
   if there are uncommitted changes, then close its editor window.
+
+### Skills
+
+`/sapa-*` skills, one per phase, so each shows up on its own in the `/` menu
+(type `sapa` to filter to just these) and can't wander into another phase, plus
+`sapa-flow` to chain them for the common case:
+
+- `skill/sapa-flow`: drive a stream end to end (plan, build, gate, submit,
+  watch). The daily entry point; the rest run a single phase.
+- `skill/sapa-plan`: agree a plan and record it on the issue, then stop.
+- `skill/sapa-build`: read the recorded plan and implement the code and tests.
+- `skill/sapa-gate`: rebase onto the base and run the quality gate, certifying
+  the branch is green against what will merge.
+- `skill/sapa-submit`: push and open the PR (draft by default), then reconcile
+  the plan on the issue.
+- `skill/sapa-watch`: monitor the PR (CI, comments, keeping it mergeable) and
+  tear the stream down when it merges.
 
 Plus `.sapa.yaml` (Sapa's own gate config; it gates itself) and `tests/`.
 
