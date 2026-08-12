@@ -12,7 +12,8 @@ full design and rationale.
 
 ## Getting started
 
-Install sapa from a clone, then set up your machine once:
+Needs `git`, `gh` (authenticated), and `python3` with PyYAML. Install sapa from
+a clone, then set up your machine once:
 
 ```sh
 bin/sapa install      # link sapa onto PATH, skills into your agents
@@ -225,11 +226,11 @@ reruns on a fresh budget.
 
 Each step under `gate.steps:` is a shell command (`run:`, which may carry a
 version-manager prefix) or a skill (`skill:`). A step may also carry `model:` to
-pin it to a model (`fable`, `opus`, `sonnet`, `haiku`): `skill:` steps then run
-in a sub-agent on that model, while unpinned steps inherit the session model. The
-recommended posture: run sessions on Opus and pin the review step to Fable, so
-the strongest model's judgment lands on the one step that is bounded,
-token-light, and needs no mid-task conversation.
+pin it to a model (`fable`, `opus`, `sonnet`, `haiku`). It is meaningful for
+`skill:` steps only: they run in a sub-agent on that model, while unpinned steps
+inherit the session model. The recommended posture: run sessions on Opus and pin
+the review step to Fable, so the strongest model's judgment lands on the one step
+that is bounded, token-light, and needs no mid-task conversation.
 
 ```yaml
 base: main
@@ -300,7 +301,7 @@ skill, model pin, result, duration, and a tail of its output, and per run the
 head and base SHAs it gated plus whether any step was given the recorded plan as
 its spec source. `sapa-submit` then puts a summary on the PR:
 
-```
+```text
 ## Gates
 
 Gated `def5678` against `origin/main@abc1234`.
