@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests for sapa-worktree, covering how it decides whether to open the new tree.
 #
-# Opening is opt-in through `editor:` in the personal settings, so HOME is
+# Opening is opt-in through `opener:` in the personal settings, so HOME is
 # sandboxed for the whole file: a developer running this with a real editor
 # configured must not have a window opened on a temp worktree.
 # Run: bash tests/test_sapa_worktree.sh
@@ -11,7 +11,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORKTREE="$HERE/../bin/sapa-worktree"
 BOOTSTRAP="$HERE/../bin/sapa-bootstrap"
-# Put bin on PATH so sapa-worktree can resolve sapa-settings for the editor key.
+# Put bin on PATH so sapa-worktree can resolve sapa-settings for the opener key.
 export PATH="$HERE/../bin:$PATH"
 
 pass=0; fail=0
@@ -59,24 +59,31 @@ chmod +x "$editor_stub"
 # --- with no settings, the path is printed and nothing is opened ---
 # $EDITOR is deliberately set here: it used to drive this, and no longer does.
 out="$(cd "$proj/main" && EDITOR="$editor_stub" VISUAL="$editor_stub" bash "$WORKTREE" plain 2>/dev/null | tail -1)"
-check "prints the worktree path when no editor is set" "$proj/plain" "$out"
+check "prints the worktree path when no opener is set" "$proj/plain" "$out"
 check "\$EDITOR no longer opens anything" "" "$(cat "$opened")"
 
-# --- with `editor:` set, the configured command runs on the new worktree ---
+# --- the former `editor:` key is ignored ---
 mkdir -p "$HOME/.sapa"
 printf 'editor: %s\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
 : > "$opened"
-( cd "$proj/main" && bash "$WORKTREE" configured >/dev/null 2>&1 )
-check "runs the configured editor on the worktree" "$proj/configured" "$(cat "$opened")"
+out="$(cd "$proj/main" && bash "$WORKTREE" legacy 2>/dev/null | tail -1)"
+check "prints the worktree path for the former editor key" "$proj/legacy" "$out"
+check "the former editor key opens nothing" "" "$(cat "$opened")"
 
-# --- a multi-word `editor:` splits into a command and its flags ---
-printf 'editor: %s -n --wait\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
+# --- with `opener:` set, the configured command runs on the new worktree ---
+printf 'opener: %s\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
+: > "$opened"
+( cd "$proj/main" && bash "$WORKTREE" configured >/dev/null 2>&1 )
+check "runs the configured opener on the worktree" "$proj/configured" "$(cat "$opened")"
+
+# --- a multi-word `opener:` splits into a command and its flags ---
+printf 'opener: %s -n --wait\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
 : > "$opened"
 ( cd "$proj/main" && bash "$WORKTREE" flags >/dev/null 2>&1 )
 check "passes the editor's own flags through" "-n --wait $proj/flags" "$(cat "$opened")"
 
 # --- a quoted value works too, since YAML allows it and the read is a grep ---
-printf 'editor: "%s"\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
+printf 'opener: "%s"\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
 : > "$opened"
 ( cd "$proj/main" && bash "$WORKTREE" quoted >/dev/null 2>&1 )
 check "strips quotes around the editor value" "$proj/quoted" "$(cat "$opened")"
@@ -84,14 +91,14 @@ check "strips quotes around the editor value" "$proj/quoted" "$(cat "$opened")"
 # --- the editor value splits on spaces but is not globbed ---
 # Splitting is the whole contract; expanding `*` against whatever sits in the
 # current directory is not, and would hand the editor a directory listing.
-printf 'editor: %s -x *.txt\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
+printf 'opener: %s -x *.txt\n' "$editor_stub" > "$HOME/.sapa/settings.yaml"
 : > "$opened"
 ( cd "$proj/main" && bash "$WORKTREE" globby >/dev/null 2>&1 )
 check "the editor value is split but not globbed" "-x *.txt $proj/globby" "$(cat "$opened")"
 
-# --- a commented-out `editor:` is not a setting ---
+# --- a commented-out `opener:` is not a setting ---
 # The template ships every key commented, so a fresh `sapa settings init` must
-# leave opening switched off rather than trying to run `# editor: code -n`.
+# leave opening switched off rather than trying to run `# opener: code -n`.
 "$HERE/../bin/sapa-settings" init --force >/dev/null
 : > "$opened"
 out="$(cd "$proj/main" && bash "$WORKTREE" fromtemplate 2>/dev/null | tail -1)"
@@ -100,7 +107,7 @@ check "the starter template runs no editor" "" "$(cat "$opened")"
 rm -f "$HOME/.sapa/settings.yaml"
 
 # --- the worktree is created either way ---
-for name in plain configured flags quoted globby fromtemplate; do
+for name in plain legacy configured flags quoted globby fromtemplate; do
   if [ -d "$proj/$name" ]; then
     ok "created the $name worktree"
   else

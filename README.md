@@ -20,7 +20,7 @@ bin/sapa install      # link sapa onto PATH, skills into your agents
 sapa settings init    # write a commented ~/.sapa/settings.yaml
 ```
 
-The settings file is yours alone: `editor:` opens each new worktree in your
+The settings file is yours alone: `opener:` opens each new worktree in your
 editor, `closer:` closes its window when the stream merges. Both are opt-in; with
 no settings file sapa manages worktrees and leaves your desktop alone.
 Prerequisites and installer options are under [Install](#install).
@@ -35,7 +35,7 @@ Once per project:
    process config: base branch, tracker, gate steps, draft vs ready PRs. See
    [Config](#config).
 3. `sapa start 42` creates a worktree for issue 42 on a branch named for it, and
-   opens it in your editor if `editor:` is set.
+   opens it in your editor if `opener:` is set.
 4. Open Claude Code or Codex in the worktree, if your editor has not already.
 
 ### The flow
@@ -277,16 +277,16 @@ Both keys are opt-in, and the key being there is the opt-in. With no settings
 file sapa opens no windows and closes none, so a teammate who clones your project
 gets a tool that manages worktrees and leaves their desktop alone.
 
-- `editor:`: a command `sapa worktree` (and so `sapa start`) runs on a new
+- `opener:`: a command `sapa worktree` (and so `sapa start`) runs on a new
   worktree, with the path as its last argument. It splits on spaces, so
-  `editor: code -n` passes the flag through. Omit it and the path is printed
+  `opener: code -n` passes the flag through. Omit it and the path is printed
   instead.
 - `closer:`: a command `sapa teardown` runs once it has removed a merged
   stream's worktree, with the worktree's basename as its argument, to close the
   window that was open on it. Omit it and your windows are left alone.
 
 ```yaml
-editor: code -n
+opener: code -n
 closer: sapa close code
 ```
 

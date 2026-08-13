@@ -12,7 +12,7 @@
 # the team agreed on.
 #
 # The workflow keys, both opt-in:
-#   editor:  a command `sapa worktree` runs on a new worktree
+#   opener:  a command `sapa worktree` runs on a new worktree
 #   closer:  a command `sapa teardown` runs to close a finished stream's window
 #
 # With no settings file, sapa opens and closes no windows at all.
@@ -52,7 +52,7 @@ write_template() {
 # A command `sapa worktree` (and so `sapa start`) runs on a new worktree, with
 # the worktree path as its last argument. Omit it and sapa prints the path
 # instead of opening anything.
-# editor: code -n
+# opener: code -n
 
 # A command `sapa teardown` runs once a merged stream's worktree is gone, with
 # the worktree's basename as its argument, to close the window that was open on

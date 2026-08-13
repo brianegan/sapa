@@ -44,11 +44,11 @@ if grep -q "settings init" <<<"$err"; then ok "-p hints at settings init"; else 
 
 # --- -p prints the contents once a file exists ---
 mkdir -p "$home/.sapa"
-printf 'editor: my-editor\n' > "$home/.sapa/settings.yaml"
+printf 'opener: my-editor\n' > "$home/.sapa/settings.yaml"
 out="$(HOME="$home" "$SETTINGS" -p)"
-check "-p prints the contents" "editor: my-editor" "$out"
+check "-p prints the contents" "opener: my-editor" "$out"
 out="$(HOME="$home" "$SETTINGS" --print)"
-check "--print is a synonym for -p" "editor: my-editor" "$out"
+check "--print is a synonym for -p" "opener: my-editor" "$out"
 
 # --- init writes the template into a fresh HOME, creating ~/.sapa ---
 fresh="$root/fresh"
@@ -67,7 +67,7 @@ else
 fi
 
 # Both workflow keys appear as commented entries, so the file is its own menu.
-for key in editor closer; do
+for key in opener closer; do
   present=no
   grep -qE "^# ?${key}:" "$fresh/.sapa/settings.yaml" && present=yes
   check "init documents $key" "yes" "$present"
@@ -81,19 +81,19 @@ else
 fi
 
 # --- init refuses to clobber existing settings without --force ---
-printf 'editor: precious\n' > "$fresh/.sapa/settings.yaml"
+printf 'opener: precious\n' > "$fresh/.sapa/settings.yaml"
 if HOME="$fresh" "$SETTINGS" init </dev/null >/dev/null 2>&1; then
   check "init refuses to overwrite (no tty)" "refused" "created"
 else
   check "init refuses to overwrite (no tty)" "refused" "refused"
 fi
-check "init leaves the existing file untouched on refuse" "editor: precious" \
+check "init leaves the existing file untouched on refuse" "opener: precious" \
   "$(cat "$fresh/.sapa/settings.yaml")"
 
 # --force overwrites it.
 HOME="$fresh" "$SETTINGS" init --force </dev/null >/dev/null 2>&1
 overwritten=no
-grep -qE "^# ?editor:" "$fresh/.sapa/settings.yaml" && overwritten=yes
+grep -qE "^# ?opener:" "$fresh/.sapa/settings.yaml" && overwritten=yes
 check "init --force overwrites" "yes" "$overwritten"
 
 # On a tty the guard prompts instead of refusing outright. Driven through a pty
@@ -120,18 +120,18 @@ PY
 
 prompted="$root/prompted"
 mkdir -p "$prompted/.sapa"
-printf 'editor: precious\n' > "$prompted/.sapa/settings.yaml"
+printf 'opener: precious\n' > "$prompted/.sapa/settings.yaml"
 if run_prompt n "$prompted"; then
   check "init prompt: no exits non-zero" "nonzero" "zero"
 else
   check "init prompt: no exits non-zero" "nonzero" "nonzero"
 fi
-check "init prompt: no leaves the file untouched" "editor: precious" \
+check "init prompt: no leaves the file untouched" "opener: precious" \
   "$(cat "$prompted/.sapa/settings.yaml")"
 
 run_prompt y "$prompted"
 overwritten=no
-grep -qE "^# ?editor:" "$prompted/.sapa/settings.yaml" && overwritten=yes
+grep -qE "^# ?opener:" "$prompted/.sapa/settings.yaml" && overwritten=yes
 check "init prompt: yes overwrites" "yes" "$overwritten"
 
 # --- unknown arguments are a usage error ---
