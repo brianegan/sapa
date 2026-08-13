@@ -44,6 +44,33 @@ find_config() {
   return 1
 }
 
+# A bootstrapped repository's container points at its bare Git directory, while
+# a checked-in config lives in the worktree for the repository's HEAD branch.
+# When the ordinary filesystem walk finds nothing, locate that registered
+# worktree and search from its root. This returns a real path, so callers see
+# uncommitted config edits just as they do when invoked inside the worktree.
+find_bare_head_config() {
+  local dir="$1" head_ref line worktree=""
+
+  [ "$(git -C "$dir" rev-parse --is-bare-repository 2>/dev/null || true)" = "true" ] \
+    || return 1
+  head_ref="$(git -C "$dir" symbolic-ref HEAD 2>/dev/null)" || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) worktree="${line#worktree }" ;;
+      "branch $head_ref")
+        [ -n "$worktree" ] || return 1
+        find_config "$worktree"
+        return
+        ;;
+      "") worktree="" ;;
+    esac
+  done < <(git -C "$dir" worktree list --porcelain 2>/dev/null)
+
+  return 1
+}
+
 # The starter config: every option present but commented, each with a one-line
 # note, so an untouched file runs on sapa's built-in defaults and doubles as the
 # menu of what can be changed. Keep the commented defaults in sync with the real
@@ -175,7 +202,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if path="$(find_config "$start")"; then
+if path="$(find_config "$start")" || path="$(find_bare_head_config "$start")"; then
   if $print_contents; then cat "$path"; else echo "$path"; fi
   exit 0
 fi

@@ -70,6 +70,38 @@ else
   pass=$((pass + 1))
 fi
 
+# A bootstrapped repository's container is a bare Git context, while its tracked
+# config lives in the worktree attached to the bare repository's HEAD branch.
+bare_root="$root/bare-layout"
+mkdir -p "$bare_root"
+git init --bare -q "$bare_root/.bare"
+printf 'gitdir: ./.bare\n' > "$bare_root/.git"
+git --git-dir="$bare_root/.bare" symbolic-ref HEAD refs/heads/trunk
+git --git-dir="$bare_root/.bare" worktree add --orphan -q -b trunk "$bare_root/trunk"
+printf 'tracker: jira\njira:\n  project: GP\n' > "$bare_root/trunk/.sapa.yaml"
+
+found="$("$CONFIG" --start "$bare_root")"
+check "bare root finds config in HEAD worktree" \
+  "$(cd "$bare_root/trunk" && pwd -P)/.sapa.yaml" "$found"
+contents="$("$CONFIG" -p --start "$bare_root")"
+check "bare root prints live config from HEAD worktree" \
+  $'tracker: jira\njira:\n  project: GP' "$contents"
+
+# The ordinary filesystem walk still wins when a config sits beside .bare.
+printf 'base: container\n' > "$bare_root/sapa.yaml"
+found="$("$CONFIG" --start "$bare_root")"
+check "container config takes precedence over HEAD worktree" \
+  "$bare_root/sapa.yaml" "$found"
+rm "$bare_root/sapa.yaml"
+
+# No matching config keeps the existing non-zero missing-config result.
+rm "$bare_root/trunk/.sapa.yaml"
+if "$CONFIG" --start "$bare_root" >/dev/null 2>&1; then
+  check "bare root without worktree config exits non-zero" "missing" "found"
+else
+  check "bare root without worktree config exits non-zero" "missing" "missing"
+fi
+
 # --- sapa config init ---
 
 # Task 1: writes .sapa.yaml into the target dir and prints the path.

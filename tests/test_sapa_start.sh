@@ -56,6 +56,22 @@ check "bare number expands to project key under tracker: jira" "gp-5-do-a-thing"
 check "explicit key still works under tracker: jira" "gp-9-other" \
   "$(cd "$cfgdir" && bash "$START" gp-9 --title 'Other' --print)"
 
+# A checked-in Jira config in the primary worktree also applies when start is
+# invoked from the bootstrapped repository's bare container.
+bare_root="$cfgdir/bare-layout"
+mkdir -p "$bare_root"
+git init --bare -q "$bare_root/.bare"
+printf 'gitdir: ./.bare\n' > "$bare_root/.git"
+git --git-dir="$bare_root/.bare" symbolic-ref HEAD refs/heads/trunk
+git --git-dir="$bare_root/.bare" worktree add --orphan -q -b trunk "$bare_root/trunk"
+printf 'tracker: jira\njira:\n  project: GP\n' > "$bare_root/trunk/.sapa.yaml"
+from_bare="$(cd "$bare_root" && bash "$START" 50 --title 'Ticket name' --print)"
+from_worktree="$(cd "$bare_root/trunk" && bash "$START" 50 --title 'Ticket name' --print)"
+check "bare root uses Jira config from primary worktree" \
+  "gp-50-ticket-name" "$from_bare"
+check "bare root and primary worktree derive the same branch" \
+  "$from_worktree" "$from_bare"
+
 # Without a jira tracker, a bare number stays a GitHub number (no expansion).
 ghdir="$(mktemp -d)"
 printf 'base: main\n' > "$ghdir/.sapa.yaml"
