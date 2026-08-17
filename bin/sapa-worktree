@@ -1,10 +1,11 @@
 #!/bin/bash
-# sapa worktree — spin up a per-branch worktree off origin/main and open it.
+# sapa worktree — spin up a per-branch worktree off the base branch and open it.
 #
 # Walks up from the current directory to the project root (the parent of the
-# `.bare` directory that sapa bootstrap creates), fetches origin, adds a worktree
-# for the given branch, runs an optional per-project setup hook, and opens the
-# tree in your editor.
+# `.bare` directory that sapa bootstrap creates), fetches the configured remote
+# (see `.sapa.yaml` `remote:`, default origin), adds a worktree for the given
+# branch off `<remote>/<base>` (see `.sapa.yaml` `base:`, default main), runs an
+# optional per-project setup hook, and opens the tree in your editor.
 #
 # Usage:
 #   sapa worktree <branch-name> [start-point]
@@ -54,8 +55,8 @@ fi
 # If the input looks like a remote ref (e.g. origin/my-feature), use the
 # remote as the start point and the rest as the branch name.
 if [ -z "$start" ] && [[ "$input" == */* ]]; then
-  remote="${input%%/*}"
-  if git -C "$project_root" remote | grep -qx "$remote"; then
+  input_remote="${input%%/*}"
+  if git -C "$project_root" remote | grep -qx "$input_remote"; then
     start="$input"
     branch="${input#*/}"
   else
@@ -67,14 +68,26 @@ fi
 
 worktree_dir="$project_root/$branch"
 
-git -C "$project_root" fetch origin
+# base/remote come from project config, read with the same best-effort grep/sed
+# pattern `sapa-start` uses (no YAML parser), falling back to the documented
+# defaults when config is absent or the key is unset.
+cfg="$("$(dirname "$0")/sapa-config" -p 2>/dev/null || true)"
+base="$(printf '%s\n' "$cfg" | sed -n 's/^base:[[:space:]]*//p' | head -1)"
+base="${base:-main}"
+remote="$(printf '%s\n' "$cfg" | sed -n 's/^remote:[[:space:]]*//p' | head -1)"
+remote="${remote:-origin}"
 
-# Default to origin/main when no start point is given.
+git -C "$project_root" fetch "$remote"
+
+# Default to <remote>/<base> when no start point is given, and don't track it:
+# the new branch is its own, not <base>'s. It gets an upstream of its own on
+# first push (`sapa submit` runs `git push -u`).
 if [ -z "$start" ]; then
-  start="origin/main"
+  start="$remote/$base"
+  git -C "$project_root" worktree add --no-track "$worktree_dir" -b "$branch" "$start"
+else
+  git -C "$project_root" worktree add "$worktree_dir" -b "$branch" "$start"
 fi
-
-git -C "$project_root" worktree add "$worktree_dir" -b "$branch" "$start"
 
 # Clean stale GIT_* env vars so tools that run git internally (e.g. FVM)
 # don't get confused by the worktree context.
