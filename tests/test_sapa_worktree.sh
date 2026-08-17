@@ -115,6 +115,64 @@ for name in plain legacy configured flags quoted globby fromtemplate; do
   fi
 done
 
+# --- the default path branches from the configured `base`, not a hardcoded main ---
+# Give origin a second branch with a marker commit, so the test can tell which
+# ref the new worktree actually started from.
+git -C "$src" checkout -q -b develop
+printf 'develop-marker\n' > "$src/develop-marker.txt"
+git -C "$src" add develop-marker.txt
+git -C "$src" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m develop
+git -C "$src" checkout -q main
+
+printf 'base: develop\n' > "$proj/.sapa.yaml"
+( cd "$proj/main" && bash "$WORKTREE" frombase >/dev/null 2>&1 )
+check "default path branches from the configured base" \
+  "$(git -C "$src" rev-parse develop)" \
+  "$(git -C "$proj/frombase" rev-parse HEAD 2>/dev/null)"
+rm -f "$proj/.sapa.yaml"
+
+# --- the default path fetches and branches from the configured `remote`, not origin ---
+# A second remote with its own main, distinct from origin's, so the test can
+# tell which remote the worktree actually started from.
+upstream_src="$root/sources/upstream"
+git init -q -b main "$upstream_src"
+printf 'upstream-marker\n' > "$upstream_src/upstream-marker.txt"
+git -C "$upstream_src" add upstream-marker.txt
+git -C "$upstream_src" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m upstream
+git -C "$proj/main" remote add upstream "$upstream_src"
+
+printf 'remote: upstream\n' > "$proj/.sapa.yaml"
+( cd "$proj/main" && bash "$WORKTREE" fromremote >/dev/null 2>&1 )
+check "default path fetches and branches from the configured remote" \
+  "$(git -C "$upstream_src" rev-parse main)" \
+  "$(git -C "$proj/fromremote" rev-parse HEAD 2>/dev/null)"
+rm -f "$proj/.sapa.yaml"
+
+# --- the default path does not track the branch it started from ---
+( cd "$proj/main" && bash "$WORKTREE" notrack >/dev/null 2>&1 )
+if git -C "$proj/notrack" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  bad "default path worktree has no upstream"
+else
+  ok "default path worktree has no upstream"
+fi
+
+# --- an explicit start point still tracks it, same as before this fix ---
+( cd "$proj/main" && bash "$WORKTREE" tracked origin/main >/dev/null 2>&1 )
+check "explicit start point still tracks it" \
+  "origin/main" \
+  "$(git -C "$proj/tracked" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
+
+# --- a remote-qualified branch name (no separate start-point arg) also still tracks it ---
+git -C "$src" checkout -q -b topic
+printf 'topic-marker\n' > "$src/topic-marker.txt"
+git -C "$src" add topic-marker.txt
+git -C "$src" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m topic
+git -C "$src" checkout -q main
+( cd "$proj/main" && bash "$WORKTREE" origin/topic >/dev/null 2>&1 )
+check "a remote-qualified branch name still tracks it" \
+  "origin/topic" \
+  "$(git -C "$proj/topic" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
+
 # --- a missing branch name is a usage error ---
 out="$(cd "$proj/main" && bash "$WORKTREE" 2>&1)"; rc=$?
 if [ $rc -eq 2 ] && grep -q "expected a branch name" <<<"$out"; then

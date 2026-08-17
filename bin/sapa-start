@@ -3,8 +3,8 @@
 #
 # Replaces the manual dance of creating a branch, copying the name, and running
 # `sapa worktree`. Given an issue, it derives a branch name from the issue title
-# and hands off to `sapa worktree` (which creates the worktree off origin/main and
-# opens your editor).
+# and hands off to `sapa worktree` (which creates the worktree off the configured
+# base branch, default origin/main, and opens your editor).
 #
 # The issue is a GitHub number (42) or a Jira key (gp-1). The key is kept in the
 # branch (`gp-1-<slug>`) so it stays self-describing and Jira's dev-panel links the
@@ -18,8 +18,9 @@
 #   sapa start <issue> --print                # print the branch, don't run sapa worktree
 #
 # GitHub access uses `gh`, Jira uses `acli`. This script only reads the issue and
-# derives a branch; it never pushes, so the configurable push remote (see
-# `.sapa.yaml` `remote:`) does not apply here.
+# derives a branch; it never pushes itself, so the configurable push remote (see
+# `.sapa.yaml` `remote:`) does not apply to it directly, though `sapa worktree`
+# reads it for the hand-off above.
 
 set -euo pipefail
 
