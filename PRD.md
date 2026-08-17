@@ -206,9 +206,10 @@ me through my existing notification hook, which opens the right window on click.
   division of labour that lets `plan:` own the planning discussion while the
   record-to-issue step always runs. Config is mostly
   agent-interpreted — `sapa config` walks up and prints the file, and the skills
-  read the keys they need the way they already read `base`. Two helpers read it
+  read the keys they need the way they already read `base`. A few helpers read it
   themselves: `sapa start` greps the printed config for `tracker`/`project` to
-  expand a bare number, and `sapa gate` parses it with PyYAML. The gate is the
+  expand a bare number, `sapa worktree` greps it for `base`/`remote` to pick its
+  default start point, and `sapa gate` parses it with PyYAML. The gate is the
   exception on purpose. Walking an ordered list of step maps is past what a grep
   reads honestly, and unlike the other phases the gate's step execution is what
   everything downstream trusts, so it earns a real parser and the tests that come
