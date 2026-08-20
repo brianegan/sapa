@@ -131,6 +131,7 @@ Clone the repo, then run the installer from it:
 
 ```sh
 bin/sapa install    # link sapa onto PATH, skills into your agents
+sapa update         # git pull the installed clone, then reinstall
 sapa uninstall      # remove those symlinks
 ```
 
@@ -149,6 +150,13 @@ Two optional overrides: `SAPA_BIN_DIR` picks the `PATH` directory (default
 `~/.local/bin`; the installer prints a hint if it isn't on your `PATH`), and
 `SAPA_AGENTS` (e.g. `SAPA_AGENTS="claude codex"`) forces the agents to target
 instead of auto-detecting.
+
+To pull the latest sapa without walking over to the clone, run `sapa update`
+from anywhere. It resolves the clone backing the `sapa` on your `PATH`, runs
+`git pull --ff-only` there, and on success re-runs `sapa install` so new or
+renamed skills get linked and the hooks get re-wired. The pull is fast-forward
+only: a clone that has diverged stops with git's own error and is left
+untouched, and the reinstall is skipped.
 
 GitHub access uses `gh`. `npx skills add <repo>` is an alternative for the skills
 half only; it can't put the `sapa` command on your `PATH`.

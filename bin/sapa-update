@@ -1,0 +1,47 @@
+#!/bin/bash
+# sapa update — pull and reinstall the sapa clone this command resolves to.
+#
+# Fast-forwards the clone that backs the sapa on your PATH, then re-runs
+# `sapa install` so any new or renamed skills get linked and the Claude hooks get
+# re-wired. Runnable from any directory: the dispatcher resolves its own symlink
+# to the clone and execs its helpers by path, so update always acts on the sapa
+# you actually run, not the repo you happen to be standing in.
+#
+# The pull is fast-forward only. If the clone has diverged or carries local
+# commits that can't fast-forward, git stops with its own error, the clone is
+# left exactly as it was, and the reinstall is skipped. A clone that isn't a git
+# repository fails the same way, naturally.
+#
+# Usage:
+#   sapa update
+
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help) grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "") ;;
+  *) echo "sapa update: unknown argument: $1" >&2
+     echo "usage: sapa update" >&2
+     exit 2 ;;
+esac
+
+# The dispatcher execs us by path from the clone's bin/, so $0 already points at
+# the real helper (no symlink resolution needed here) — its parent is the clone's
+# bin/, and the clone root is one up from that.
+src_bindir="$(cd "$(dirname "$0")" && pwd)"
+SRC="$(cd "$src_bindir/.." && pwd)"
+
+# Fast-forward or nothing: a diverged clone stops with git's own error, changes
+# nothing, and skips the reinstall. Run as an `if` condition so `set -e` doesn't
+# abort on the failure — and branch on it directly (not via `!`) so the else
+# branch's $? is git's own exit status, not the negation's.
+echo "sapa update: updating $SRC" >&2
+if git -C "$SRC" pull --ff-only; then
+  # Reinstall from the just-pulled clone so it runs the newly pulled install
+  # logic. exec so install's summary is the last word and its status is ours.
+  exec "$src_bindir/sapa" install
+else
+  status=$?
+  echo "sapa update: git pull --ff-only failed; left the clone unchanged and skipped the reinstall" >&2
+  exit "$status"
+fi
