@@ -124,7 +124,9 @@ Act on the exit code:
   --after <name> --result pass --summary "<one line on what it found>"`. Repeat
   until the gate ends on 0 or 1. A skill step whose findings are a genuine failure
   is treated like a failed step: resume with `--result fail` and a summary saying
-  why, which records the failure and stops the walk, then report it.
+  why, which records the failure and stops the walk, then report it and fix it the
+  same way any finding is fixed, by the class and not the named instance (see
+  **Fixing a finding**).
 
   Report the result honestly. The helper cannot watch a skill step the way it
   watches an exit code, so what you pass here is the only account of that step
@@ -138,16 +140,35 @@ Act on the exit code:
   Its stderr says so. Run the step again and resume as normal.
 - **1 — the last `step` line names the failing step.** Its output is directly
   above that line. Report it as a finding. If it is a judgement call, ask, and do
-  not spend an attempt on it. Otherwise apply a safe, mechanical fix and rerun
-  with `sapa gate --fix-attempt`, within the budget below. Do not certify green
-  until every step passes. The user may interrupt to change something and rerun
-  `/sapa-gate`.
+  not spend an attempt on it. Otherwise fix it the way **Fixing a finding** below
+  describes, the class and not just the named instance, and rerun with `sapa gate
+  --fix-attempt`, within the budget below. Do not certify green until every step
+  passes. The user may interrupt to change something and rerun `/sapa-gate`.
 - **2 — nothing ran.** Back to Step 1: either you are outside a worktree, or the
   config is missing or malformed. The message says which, and the two take
   different recoveries.
 - **5 — the autofix budget is spent, so nothing ran.** You reached for another fix
   after the budget said stop. Do not try again: report where it stands and hand
   the stream back, as below.
+
+### Fixing a finding
+
+A finding is one instance of something, and rarely the whole of it. Before you
+call it fixed and pay for another gate, work out its root cause and the class of
+thing that cause produces, then eliminate every instance of that class across the
+changed surface in one pass, not only the instance the gate named. A stale name a
+review flags in one file is usually the same edit missed in ten others; a bug one
+test catches is often the same mistake in its siblings. So fix the class, then
+spot-check that you did: re-run the step, grep the tree for the pattern, look at
+what else the same cause would have touched. This is the instinct a finding should
+trigger, and it is what stops the gate from surfacing the next instance of a class
+you already met a round later.
+
+This governs how thoroughly you fix, not whether you guess. The judgement-call
+carve-out holds either way: a finding whose fix is a real decision still gets
+raised rather than swept, as the exit-1 handling above says. What the class-first
+pass changes is that once you are fixing, you fix the cause and its whole class,
+not the single instance in front of you.
 
 ### The autofix budget
 
@@ -189,6 +210,15 @@ read args. That keeps the contract skill-agnostic: any review skill that accepts
 a spec path reviews against the plan, not against a guessed surface such as the
 untouched issue body.
 
+The prompt must also ask the review to be exhaustive per class: for each finding,
+report every instance of its class present in the changed surface, not one
+representative instance. A review left free to name only the first stale name or
+the first missed case hands the gate the rest one at a time, a round each; asking
+it to enumerate the whole class up front is what lets a single round clear it and
+is the review-side half of **Fixing a finding** above. State this in the prompt
+itself so it holds for whatever review skill is configured, rather than assuming a
+skill enumerates on its own.
+
 `absent` means there is no plan to review against: either none is recorded —
 legitimate when `/sapa-gate` runs standalone before planning, an anomaly inside
 the flow — or the read itself failed, which the helper says on stderr. Check
@@ -208,7 +238,8 @@ When the `needs-skill` line carries a model (anything but `-`), run that step
 inside a single sub-agent pinned to that model via the Agent tool's model
 override. The sub-agent's prompt: invoke that skill against the diff
 `<remote>/<base>...HEAD`, using the materialized plan file as the spec source,
-and return its findings verbatim. Treat the sub-agent's findings as the step
-result, exactly as an in-session invocation would be. Sub-agents the skill itself
-spawns inherit the pinned model, so a review skill's parallel reviewers run on it
-too. With `-`, invoke the skill in-session with the same spec path.
+enumerating every instance of each finding's class in that diff, and return its
+findings verbatim. Treat the sub-agent's findings as the step result, exactly as
+an in-session invocation would be. Sub-agents the skill itself spawns inherit the
+pinned model, so a review skill's parallel reviewers run on it too. With `-`,
+invoke the skill in-session with the same spec path.
