@@ -54,7 +54,7 @@ import tempfile
 # in whichever verb needs it, not a raw traceback from an inline import.
 try:
     import yaml
-except ModuleNotFoundError:
+except ImportError:
     yaml = None
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -350,13 +350,28 @@ def set_shas(text: str, want: dict) -> str:
     return "".join(lines)
 
 
+def compose_config(text: str, path: str):
+    """Compose the config into a node tree (which carries line/column marks the
+    read-path dict lacks), applying the same friendly guards as load_yaml: a
+    YAML error and a non-mapping document both raise SkillsError rather than a
+    raw traceback or a silent no-op, so lock and check agree on a bad config."""
+    y = require_yaml()
+    try:
+        root = y.compose(text)
+    except y.YAMLError as e:
+        raise SkillsError(f"{path} is not valid YAML: {e}")
+    if root is not None and not isinstance(root, y.MappingNode):
+        raise SkillsError(f"{path} does not hold a mapping of settings")
+    return root
+
+
 def cmd_lock(rest: list[str]) -> int:
     start = parse_start(rest)
     path = find_config(start)
     with open(path, encoding="utf-8") as f:
         text = f.read()
 
-    root = require_yaml().compose(text)
+    root = compose_config(text, path)
     nodes = _object_skill_nodes(root)
     if not nodes:
         print("sapa skills lock: no object-form skills to lock")

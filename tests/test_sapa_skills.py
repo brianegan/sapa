@@ -321,6 +321,19 @@ def test_lock_inserts_sha_preserving_comments():
                 f"adjacent={adjacent})")
 
 
+def test_lock_errors_on_bad_config():
+    # lock's error contract matches check's: a non-mapping config is a loud
+    # SkillsError, not a silent "nothing to lock" exit 0.
+    with tempfile.TemporaryDirectory() as root:
+        wt = make_worktree(root)
+        write_config(wt, "- a\n- b\n")
+        r = run(["lock"], start=wt)
+        if r.returncode != 0 and "does not hold a mapping" in r.stderr:
+            ok("lock errors on a non-mapping config instead of a silent no-op")
+        else:
+            bad(f"lock errors on a non-mapping config (rc={r.returncode}, {r.stderr!r})")
+
+
 def test_lock_replaces_existing_sha():
     with tempfile.TemporaryDirectory() as root:
         wt = make_worktree(root)
@@ -500,6 +513,7 @@ def main():
     test_check_missing_skill_md()
     test_check_non_mapping_config_errors()
     test_lock_inserts_sha_preserving_comments()
+    test_lock_errors_on_bad_config()
     test_lock_replaces_existing_sha()
     test_sync_vendors_folder_and_license()
     test_sync_errors_without_sha()
