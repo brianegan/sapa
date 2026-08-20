@@ -44,8 +44,10 @@ instead of the current directory.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 VERBS = ("enumerate", "lock", "sync", "check", "update")
 
@@ -67,9 +69,8 @@ def usage() -> None:
 def parse_start(rest: list[str]) -> str:
     """Pull an optional `--start DIR` out of a verb's args, defaulting to $PWD.
 
-    Kept deliberately small: every verb takes the same one option, so a shared
-    parser beats argparse ceremony and matches the other helpers' hand-rolled
-    style."""
+    Every verb takes the same single option, so this stays a few lines rather
+    than reaching for argparse the larger Python helpers use."""
     start = os.environ.get("PWD") or os.getcwd()
     args = list(rest)
     while args:
@@ -106,13 +107,19 @@ def load_yaml(path: str) -> dict:
             f"(install it with: {sys.executable} -m pip install pyyaml)"
         )
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except OSError as e:
         raise SkillsError(f"cannot read {path}: {e}")
     except yaml.YAMLError as e:
         raise SkillsError(f"{path} is not valid YAML: {e}")
-    return data if isinstance(data, dict) else {}
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        # Match sapa-gate: a config that is not a mapping is an error, not an
+        # empty config coerced to a falsely-passing `check`.
+        raise SkillsError(f"{path} does not hold a mapping of settings")
+    return data
 
 
 def skill_name(value) -> str:
@@ -331,7 +338,7 @@ def set_shas(text: str, want: dict) -> str:
 def cmd_lock(rest: list[str]) -> int:
     start = parse_start(rest)
     path = find_config(start)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         text = f.read()
 
     import yaml
@@ -355,7 +362,7 @@ def cmd_lock(rest: list[str]) -> int:
 
     new_text = set_shas(text, want)
     if new_text != text:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(new_text)
 
     for name, sha in report:
@@ -377,10 +384,7 @@ def _find_license(d: str):
 def _vendor_one(source: str, path: str, sha: str, name: str, dest_root: str) -> None:
     """Materialize one skill folder at its pinned SHA into
     dest_root/<name>/, carrying a LICENSE for attribution."""
-    import shutil
-    import tempfile as _tempfile
-
-    with _tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp:
         checkout = os.path.join(tmp, "repo")
         clone = subprocess.run(
             ["git", "clone", "--quiet", "--no-checkout", source_url(source), checkout],
@@ -473,8 +477,15 @@ def main(argv: list[str]) -> int:
         usage()
         return 0
 
+    verbs = {
+        "enumerate": cmd_enumerate,
+        "lock": cmd_lock,
+        "sync": cmd_sync,
+        "check": cmd_check,
+        "update": cmd_update,
+    }
     verb, rest = argv[0], argv[1:]
-    if verb not in VERBS:
+    if verb not in verbs:
         print(f"sapa skills: unknown verb: {verb}", file=sys.stderr)
         print(f"verbs: {' '.join(VERBS)}", file=sys.stderr)
         print("run 'sapa skills --help' for usage", file=sys.stderr)
@@ -484,12 +495,8 @@ def main(argv: list[str]) -> int:
         usage()
         return 0
 
-    handler = globals().get(f"cmd_{verb}")
-    if handler is None:
-        print(f"sapa skills: {verb} is not implemented yet", file=sys.stderr)
-        return 3
     try:
-        return handler(rest)
+        return verbs[verb](rest)
     except SkillsError as e:
         print(f"sapa skills {verb}: {e}", file=sys.stderr)
         return 1

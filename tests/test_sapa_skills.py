@@ -475,6 +475,19 @@ def test_update_bumps_and_refreshes_uncommitted():
                 f"refreshed={refreshed}, uncommitted={uncommitted})")
 
 
+def test_check_non_mapping_config_errors():
+    # A config that is not a mapping is an error, not an empty config coerced to
+    # a falsely-passing check (matches sapa-gate's load_config).
+    with tempfile.TemporaryDirectory() as root:
+        wt = make_worktree(root)
+        write_config(wt, "- a\n- b\n")
+        r = run(["check"], start=wt)
+        if r.returncode != 0 and "does not hold a mapping" in r.stderr:
+            ok("check errors on a non-mapping config instead of passing empty")
+        else:
+            bad(f"check errors on a non-mapping config (rc={r.returncode}, {r.stderr!r})")
+
+
 def main():
     test_help()
     test_unknown_verb()
@@ -485,6 +498,7 @@ def main():
     test_check_missing_folder()
     test_check_orphan_folder()
     test_check_missing_skill_md()
+    test_check_non_mapping_config_errors()
     test_lock_inserts_sha_preserving_comments()
     test_lock_replaces_existing_sha()
     test_sync_vendors_folder_and_license()
