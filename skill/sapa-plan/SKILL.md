@@ -31,8 +31,10 @@ it no-ops outside a sapa stream and never needs your input). It is how
    - Jira: `acli jira workitem view <KEY>` (the plain view renders the description
      as readable text).
 3. **Plan with the user.** Check the config for a planning skill: run
-   `sapa config -p` and look for a `plan:` key. If it names a skill, invoke that
-   skill to run the discussion (for example wingspan `/plan` or
+   `sapa config -p` and look for a `plan:` key. Its value is either a bare skill
+   name or an object that `sapa skills` provisions. With an object, the skill's
+   name is its `name:` or the last component of its `path:`. If it names a skill,
+   invoke that skill to run the discussion (for example wingspan `/plan` or
    `/grilling`); if there is no config or no `plan:` key, discuss the
    approach here. Either way keep the plan about intent and decisions, not
    file-by-file code, and always continue to step 4 — recording it on the issue
@@ -86,7 +88,9 @@ it no-ops outside a sapa stream and never needs your input). It is how
    minimum: the work decides the count, one task upward.
 
    **Style the free prose before recording.** Run `sapa config -p` and look for a
-   `writing_style:` key. If it names a skill, run that skill over the drafted free
+   `writing_style:` key. Its value follows the same rule as `plan:`: a bare skill
+   name, or an object `sapa skills` provisions whose name is its `name:` or its
+   `path:` basename. If it names a skill, run that skill over the drafted free
    prose — the intent statement and the `Decisions & Discussions` bullets — as a
    final pass before you encode and record, so the plan reads in the repo's chosen
    voice. Leave the `## Tasks` section untouched: its titles are terse by design

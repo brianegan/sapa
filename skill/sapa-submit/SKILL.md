@@ -72,7 +72,9 @@ Run `sapa config -p` and read these top-level keys (all optional):
 
 3. Build the PR body in a managed section so it is protected from the start.
    First, if `writing_style:` in the config names a skill, run it over the free
-   prose as a final pass — the `## Summary`, `## Changes`, and `## Testing`
+   prose as a final pass. Its value is either a bare skill name or an object
+   `sapa skills` provisions whose name is its `name:` or its `path:` basename. The
+   pass covers the `## Summary`, `## Changes`, and `## Testing`
    sections — leaving the Conventional Commits title untouched, since it is a
    structured line rather than prose. Invoke the skill the normal way (for example
    `/humanizer`); if it cannot be model-invoked, read its `SKILL.md` and apply its

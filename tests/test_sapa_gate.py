@@ -329,6 +329,39 @@ def test_list_prints_each_step_with_kind_and_model():
 
 
 @case
+def test_object_form_skill_resolves_to_its_invocation_name():
+    # A skill provisioned by `sapa skills` is an object carrying its source and
+    # pinned SHA; the gate must still resolve the name it invokes, from `name:`
+    # or the last component of `path:`.
+    config = (
+        "base: main\n"
+        "gate:\n"
+        "  steps:\n"
+        "    - name: review\n"
+        "      skill:\n"
+        "        source: mattpocock/skills\n"
+        "        path: skills/engineering/code-review\n"
+        "        sha: abc123\n"
+        "      model: fable\n"
+        "    - name: style\n"
+        "      skill:\n"
+        "        source: blader/humanizer\n"
+        "        path: .\n"
+        "        name: humanizer\n"
+        "    - name: test\n"
+        "      run: 'true'\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Repo(tmp, config).run("--list")
+        assert p.returncode == 0, p.stderr
+        assert lines(p.stdout) == [
+            ["list", "review", "skill", "code-review", "fable"],
+            ["list", "style", "skill", "humanizer", "-"],
+            ["list", "test", "run", "true", "-"],
+        ], p.stdout
+
+
+@case
 def test_list_runs_nothing():
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, gate_of(run_step("touch", "echo ran > ran.txt")))

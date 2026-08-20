@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+"""sapa skills — provision and verify the skills your .sapa.yaml references.
+
+The flow and gate are driven by skills the config names: `plan`, `build`, and
+`writing_style` each name one, and any gate step can `skill:` one. Those skills
+must exist on the machine for the flow and gate to work. This command owns
+provisioning them, pinned, so a fresh checkout runs with nothing installed by
+hand.
+
+The config is the single source of truth. A skill is named one of two ways:
+
+    plan: grilling            # a bare string — bring your own, resolved however
+                              # you already resolve skills (a global install).
+                              # sapa does not provision it.
+
+    writing_style:            # an object — provision this one. sapa vendors it
+      source: blader/humanizer  #   owner/repo (or a full git URL, or a local path)
+      path: .                   #   the skill folder within that repo ('.' = root)
+      sha: <40-hex>             #   the pinned commit, filled in by `lock`
+      name: humanizer           #   optional; defaults to basename(path)
+
+The vendored skill lands in <worktree>/.claude/skills/<name>/, the only place
+Claude Code resolves a project skill. Whether you commit those folders (the
+shared case) or gitignore them is your project's choice.
+
+Verbs:
+    enumerate   print every skill the config references, one name per line
+    lock        resolve each object-form skill's source HEAD to a SHA, write it
+    sync        materialize each pinned skill into .claude/skills/<name>/
+    check       verify (offline) the config and the vendored folders agree
+    update      re-pin every object-form skill to the latest SHA and re-sync
+
+Usage:
+    sapa skills enumerate [--start DIR]
+    sapa skills lock [--start DIR]
+    sapa skills sync [--start DIR]
+    sapa skills check [--start DIR]
+    sapa skills update [--start DIR]
+
+--start DIR resolves the config (via `sapa config`) and the worktree from DIR
+instead of the current directory.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+VERBS = ("enumerate", "lock", "sync", "check", "update")
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+# The config keys that name a single skill. Gate steps name skills too, under
+# gate.steps[].skill; those are handled separately.
+SKILL_KEYS = ("plan", "build", "writing_style")
+
+
+class SkillsError(Exception):
+    """A user-facing failure: printed to stderr, turned into a non-zero exit."""
+
+
+def usage() -> None:
+    print(__doc__.rstrip())
+
+
+def parse_start(rest: list[str]) -> str:
+    """Pull an optional `--start DIR` out of a verb's args, defaulting to $PWD.
+
+    Kept deliberately small: every verb takes the same one option, so a shared
+    parser beats argparse ceremony and matches the other helpers' hand-rolled
+    style."""
+    start = os.environ.get("PWD") or os.getcwd()
+    args = list(rest)
+    while args:
+        a = args.pop(0)
+        if a == "--start":
+            if not args:
+                raise SkillsError("--start needs a directory")
+            start = args.pop(0)
+        else:
+            raise SkillsError(f"unknown argument: {a}")
+    return start
+
+
+def find_config(start: str) -> str:
+    """The discovered .sapa.yaml path, via the sibling `sapa-config` so config
+    discovery (the walk-up, the bare-head fallback) is shared, not re-derived."""
+    r = subprocess.run(
+        [os.path.join(HERE, "sapa-config"), "--start", start],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    if r.returncode != 0:
+        raise SkillsError((r.stderr or "no .sapa.yaml found").strip())
+    return r.stdout.strip()
+
+
+def load_yaml(path: str) -> dict:
+    """Read the config as a plain dict with pyyaml — the read path, kept off
+    ruamel so the offline verbs (enumerate, check) need only pyyaml."""
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        raise SkillsError(
+            f"pyyaml is required but not importable by {sys.executable} "
+            f"(install it with: {sys.executable} -m pip install pyyaml)"
+        )
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except OSError as e:
+        raise SkillsError(f"cannot read {path}: {e}")
+    except yaml.YAMLError as e:
+        raise SkillsError(f"{path} is not valid YAML: {e}")
+    return data if isinstance(data, dict) else {}
+
+
+def skill_name(value) -> str:
+    """The skill's provisioned folder name, from a config value.
+
+    A bare string is its own name. An object names itself with `name:`, else by
+    the last component of `path` (so `skills/productivity/grilling` -> grilling);
+    a repo-root skill (`path: .`) must carry an explicit `name`."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        name = value.get("name")
+        if isinstance(name, str) and name:
+            return name
+        path = value.get("path")
+        if isinstance(path, str):
+            base = os.path.basename(path.rstrip("/"))
+            if base and base != ".":
+                return base
+        raise SkillsError(
+            "a provisioned skill needs a resolvable name: give it a `name:` or a "
+            "`path:` whose last component names the skill"
+        )
+    raise SkillsError(f"a skill must be a string or a mapping, got {type(value).__name__}")
+
+
+def referenced(cfg: dict) -> list[tuple[str, object]]:
+    """Every skill the config references, as (name, value) pairs in a stable
+    order: plan, build, writing_style, then each gate step's skill. `value` is
+    the raw config value — a string (bare) or a dict (object-form)."""
+    out: list[tuple[str, object]] = []
+    for key in SKILL_KEYS:
+        if key in cfg and cfg[key] is not None:
+            out.append((skill_name(cfg[key]), cfg[key]))
+    gate = cfg.get("gate")
+    if isinstance(gate, dict):
+        steps = gate.get("steps")
+        if isinstance(steps, list):
+            for step in steps:
+                if isinstance(step, dict) and step.get("skill") is not None:
+                    out.append((skill_name(step["skill"]), step["skill"]))
+    return out
+
+
+def cmd_enumerate(rest: list[str]) -> int:
+    start = parse_start(rest)
+    cfg = load_yaml(find_config(start))
+    for name, _value in referenced(cfg):
+        print(name)
+    return 0
+
+
+def worktree_root(start: str) -> str:
+    """The git worktree holding `start` — the top level, not the bare dir. This
+    is the only place Claude Code resolves a project skill, so it is where skills
+    are vendored and checked."""
+    r = subprocess.run(
+        ["git", "-C", start, "rev-parse", "--show-toplevel"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    if r.returncode != 0:
+        raise SkillsError(f"{start} is not inside a git worktree")
+    return r.stdout.strip()
+
+
+def skills_dir(start: str) -> str:
+    return os.path.join(worktree_root(start), ".claude", "skills")
+
+
+def provisioned_names(cfg: dict) -> set[str]:
+    """The skills sapa provisions: the object-form references only. A bare-string
+    reference is bring-your-own, so it is out of scope here."""
+    return {name for name, value in referenced(cfg) if isinstance(value, dict)}
+
+
+def present_folders(sdir: str) -> set[str]:
+    if not os.path.isdir(sdir):
+        return set()
+    return {d for d in os.listdir(sdir) if os.path.isdir(os.path.join(sdir, d))}
+
+
+def cmd_check(rest: list[str]) -> int:
+    start = parse_start(rest)
+    cfg = load_yaml(find_config(start))
+    sdir = skills_dir(start)
+
+    want = provisioned_names(cfg)
+    have = present_folders(sdir)
+
+    offenders: list[str] = []
+    for name in sorted(want - have):
+        offenders.append(f"referenced but not vendored: {name}")
+    for name in sorted(have - want):
+        offenders.append(f"vendored but not referenced: {name}")
+    for name in sorted(want & have):
+        if not os.path.isfile(os.path.join(sdir, name, "SKILL.md")):
+            offenders.append(f"vendored folder has no SKILL.md: {name}")
+
+    if offenders:
+        print("sapa skills check: config and .claude/skills do not agree:",
+              file=sys.stderr)
+        for o in offenders:
+            print(f"  {o}", file=sys.stderr)
+        return 1
+
+    print(f"sapa skills check: {len(want)} provisioned skill(s), all present")
+    return 0
+
+
+def source_url(source: str) -> str:
+    """The git URL to fetch a skill's source from. A `source` may be a local
+    path (used in tests and for a sibling checkout), a full git URL, or the
+    `owner/repo` shorthand, which means GitHub."""
+    if os.path.isdir(source):
+        return source
+    if "://" in source or source.startswith("git@"):
+        return source
+    return f"https://github.com/{source}.git"
+
+
+def resolve_head_sha(source: str) -> str:
+    """The source repo's default-branch HEAD, resolved with `git ls-remote` so no
+    clone is needed just to learn the SHA."""
+    r = subprocess.run(
+        ["git", "ls-remote", source_url(source), "HEAD"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        detail = r.stderr.strip() or "no HEAD ref"
+        raise SkillsError(f"could not resolve HEAD of {source}: {detail}")
+    return r.stdout.split()[0]
+
+
+def _child(mapnode, key):
+    """The (key_node, value_node) pair for `key` in a yaml MappingNode, or
+    (None, None)."""
+    for k, v in mapnode.value:
+        if getattr(k, "value", None) == key:
+            return k, v
+    return None, None
+
+
+def _object_skill_nodes(root):
+    """Every object-form skill's value MappingNode in a composed yaml tree, in
+    document order: the plan/build/writing_style blocks, then each gate step's
+    `skill` block. Composed nodes carry line/column marks, which the read-path
+    dict does not, so lock edits from these and reads values through them."""
+    import yaml
+    out = []
+    if not isinstance(root, yaml.MappingNode):
+        return out
+    for k, v in root.value:
+        if k.value in SKILL_KEYS and isinstance(v, yaml.MappingNode):
+            out.append(v)
+    _, gate = _child(root, "gate")
+    if isinstance(gate, yaml.MappingNode):
+        _, steps = _child(gate, "steps")
+        if isinstance(steps, yaml.SequenceNode):
+            for item in steps.value:
+                if isinstance(item, yaml.MappingNode):
+                    _, skill = _child(item, "skill")
+                    if isinstance(skill, yaml.MappingNode):
+                        out.append(skill)
+    return out
+
+
+def _node_name(mapnode) -> str:
+    _, name = _child(mapnode, "name")
+    if name is not None and name.value:
+        return name.value
+    _, path = _child(mapnode, "path")
+    if path is not None:
+        base = os.path.basename(path.value.rstrip("/"))
+        if base and base != ".":
+            return base
+    return "?"
+
+
+def set_shas(text: str, want: dict) -> str:
+    """Write a `sha:` into each object-form skill block, surgically. `want` maps
+    the block's MappingNode to its new SHA. Only the `sha:` scalar is touched (or
+    one line inserted where none exists), so every comment and every other byte
+    is preserved — the reason lock needs no comment-aware YAML writer."""
+    lines = text.splitlines(keepends=True)
+    replaces = []   # (line_idx, start_col, end_col, sha)
+    inserts = []    # (line_idx, indent, sha)
+    for mn, sha in want.items():
+        _, shanode = _child(mn, "sha")
+        if shanode is not None:
+            m = shanode.start_mark
+            e = shanode.end_mark
+            replaces.append((m.line, m.column, e.column, sha))
+        else:
+            # Insert right after the block's last field, not at the mapping's
+            # end_mark: pyyaml stretches a mapping's end past trailing comments to
+            # the next token, so end_mark would drop the sha below unrelated
+            # comment lines. The last field's own end is the true bottom of the
+            # block's content.
+            indent = mn.value[0][0].start_mark.column
+            last_value = mn.value[-1][1]
+            inserts.append((last_value.end_mark.line + 1, indent, sha))
+
+    for line_idx, start_col, end_col, sha in replaces:
+        ln = lines[line_idx]
+        lines[line_idx] = ln[:start_col] + sha + ln[end_col:]
+
+    for line_idx, indent, sha in sorted(inserts, key=lambda x: x[0], reverse=True):
+        # Guard against a block that ends the file without a trailing newline.
+        if line_idx > 0 and not lines[line_idx - 1].endswith("\n"):
+            lines[line_idx - 1] += "\n"
+        lines.insert(line_idx, f"{' ' * indent}sha: {sha}\n")
+
+    return "".join(lines)
+
+
+def cmd_lock(rest: list[str]) -> int:
+    start = parse_start(rest)
+    path = find_config(start)
+    with open(path) as f:
+        text = f.read()
+
+    import yaml
+    root = yaml.compose(text)
+    nodes = _object_skill_nodes(root)
+    if not nodes:
+        print("sapa skills lock: no object-form skills to lock")
+        return 0
+
+    want = {}
+    report = []
+    for mn in nodes:
+        _, src = _child(mn, "source")
+        if src is None or not src.value:
+            raise SkillsError(
+                f"provisioned skill '{_node_name(mn)}' has no `source` to lock"
+            )
+        sha = resolve_head_sha(src.value)
+        want[mn] = sha
+        report.append((_node_name(mn), sha))
+
+    new_text = set_shas(text, want)
+    if new_text != text:
+        with open(path, "w") as f:
+            f.write(new_text)
+
+    for name, sha in report:
+        print(f"sapa skills lock: {name} -> {sha[:12]}")
+    return 0
+
+
+LICENSE_NAMES = ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")
+
+
+def _find_license(d: str):
+    for n in LICENSE_NAMES:
+        p = os.path.join(d, n)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _vendor_one(source: str, path: str, sha: str, name: str, dest_root: str) -> None:
+    """Materialize one skill folder at its pinned SHA into
+    dest_root/<name>/, carrying a LICENSE for attribution."""
+    import shutil
+    import tempfile as _tempfile
+
+    with _tempfile.TemporaryDirectory() as tmp:
+        checkout = os.path.join(tmp, "repo")
+        clone = subprocess.run(
+            ["git", "clone", "--quiet", "--no-checkout", source_url(source), checkout],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if clone.returncode != 0:
+            raise SkillsError(f"could not clone {source}: {clone.stderr.strip()}")
+        co = subprocess.run(
+            ["git", "-C", checkout, "checkout", "--quiet", sha],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if co.returncode != 0:
+            raise SkillsError(f"could not checkout {sha[:12]} of {source}: {co.stderr.strip()}")
+
+        rel = "." if path in (".", "", None) else path
+        src_folder = checkout if rel == "." else os.path.join(checkout, rel)
+        if not os.path.isfile(os.path.join(src_folder, "SKILL.md")):
+            raise SkillsError(
+                f"{source} at {sha[:12]} has no SKILL.md under path '{rel}' for '{name}'"
+            )
+
+        dest = os.path.join(dest_root, name)
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(src_folder, dest, ignore=shutil.ignore_patterns(".git"))
+
+        # Attribution is mandatory: the skill's own folder wins, else the repo
+        # root's, else it is a hard failure rather than a silent bare vendor.
+        if _find_license(dest) is None:
+            root_license = _find_license(checkout)
+            if root_license is None:
+                shutil.rmtree(dest)
+                raise SkillsError(
+                    f"no LICENSE found in {source} for '{name}'; refusing to vendor "
+                    f"without attribution"
+                )
+            shutil.copy2(root_license, os.path.join(dest, os.path.basename(root_license)))
+
+
+def _object_skills(cfg: dict) -> list[dict]:
+    """The object-form (provisioned) references as {name, source, path, sha}
+    dicts, resolved for the network verbs."""
+    out = []
+    for name, value in referenced(cfg):
+        if isinstance(value, dict):
+            out.append({
+                "name": name,
+                "source": value.get("source"),
+                "path": value.get("path", "."),
+                "sha": value.get("sha"),
+            })
+    return out
+
+
+def cmd_sync(rest: list[str]) -> int:
+    start = parse_start(rest)
+    cfg = load_yaml(find_config(start))
+    dest_root = skills_dir(start)
+
+    skills = _object_skills(cfg)
+    if not skills:
+        print("sapa skills sync: no object-form skills to sync")
+        return 0
+
+    os.makedirs(dest_root, exist_ok=True)
+    for s in skills:
+        if not s["source"]:
+            raise SkillsError(f"provisioned skill '{s['name']}' has no `source`")
+        if not s["sha"]:
+            raise SkillsError(
+                f"provisioned skill '{s['name']}' has no `sha`; run `sapa skills lock` first"
+            )
+        _vendor_one(s["source"], s["path"], s["sha"], s["name"], dest_root)
+        print(f"sapa skills sync: vendored {s['name']} at {s['sha'][:12]}")
+    return 0
+
+
+def cmd_update(rest: list[str]) -> int:
+    """Re-pin every object-form skill to its source's latest HEAD, then re-vendor.
+    Neither step commits, so the SHA bumps and refreshed folders are left as a
+    reviewable working-tree diff."""
+    rc = cmd_lock(rest)
+    if rc != 0:
+        return rc
+    return cmd_sync(rest)
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        usage()
+        return 0
+
+    verb, rest = argv[0], argv[1:]
+    if verb not in VERBS:
+        print(f"sapa skills: unknown verb: {verb}", file=sys.stderr)
+        print(f"verbs: {' '.join(VERBS)}", file=sys.stderr)
+        print("run 'sapa skills --help' for usage", file=sys.stderr)
+        return 2
+
+    if rest and rest[0] in ("-h", "--help"):
+        usage()
+        return 0
+
+    handler = globals().get(f"cmd_{verb}")
+    if handler is None:
+        print(f"sapa skills: {verb} is not implemented yet", file=sys.stderr)
+        return 3
+    try:
+        return handler(rest)
+    except SkillsError as e:
+        print(f"sapa skills {verb}: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

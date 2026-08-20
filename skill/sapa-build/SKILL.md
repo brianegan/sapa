@@ -39,7 +39,9 @@ it no-ops outside a sapa stream and never needs your input). It is how
    from elsewhere, and it needs re-recording with `/sapa-plan` before build. Do not
    fall back to a single-pass build — the task list is the build contract.
 3. **Load the configured build skill.** Run `sapa config -p` and look for a
-   `build:` key. If it names a skill, invoke it now — before task 1, so its
+   `build:` key. Its value is either a bare skill name or an object `sapa skills`
+   provisions whose name is its `name:` or its `path:` basename. If it names a
+   skill, invoke it now — before task 1, so its
    guidance shapes every task that follows (for example `/tdd` to build
    test-first). Invoke it the normal way; if it cannot be model-invoked, read its
    `SKILL.md` and apply its guidance by hand. If there is no config or no `build:`
