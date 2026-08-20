@@ -31,6 +31,7 @@ run test_sapa_worktree.sh  bash    "$HERE/test_sapa_worktree.sh"
 run test_sapa_teardown.sh  bash    "$HERE/test_sapa_teardown.sh"
 run test_sapa_close.sh     bash    "$HERE/test_sapa_close.sh"
 run test_sapa_install.sh   bash    "$HERE/test_sapa_install.sh"
+run test_sapa_update.sh    bash    "$HERE/test_sapa_update.sh"
 run test_sapa_uninstall.sh bash    "$HERE/test_sapa_uninstall.sh"
 run test_sapa_completion.sh bash   "$HERE/test_sapa_completion.sh"
 

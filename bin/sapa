@@ -26,12 +26,13 @@
 #   teardown    remove a merged stream's worktree and local branch
 #   close       close a finished stream's editor window (a closer for teardown)
 #   install     link sapa onto PATH and its skills into your agents
+#   update      git pull the installed clone and reinstall
 #   uninstall   remove the symlinks sapa install created
 #   completion  print a shell completion script (e.g. eval "$(sapa completion zsh)")
 
 set -euo pipefail
 
-commands="bootstrap worktree start issue config settings tmp section status gate watch teardown close install uninstall completion"
+commands="bootstrap worktree start issue config settings tmp section status gate watch teardown close install update uninstall completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 

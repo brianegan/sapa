@@ -137,6 +137,20 @@ me through my existing notification hook, which opens the right window on click.
 
 - **Form factor.** A Claude Code skill plus small `git`/`gh` helper scripts.
   Not a binary, not a long-lived daemon, not a proxy remote.
+- **Install and update (#135).** `sapa install` links the `sapa` command onto
+  `PATH` and the skills into each agent, pointing every link back into the clone,
+  so the installed copy tracks the source and a sapa developer works from their
+  `main` checkout. `sapa update` closes the loop on that model: it resolves the
+  clone the running `sapa` points at, runs `git pull --ff-only` there, and on
+  success re-runs `sapa install` so a pull that added or renamed a skill, or
+  changed the hook wiring, takes effect in one command rather than leaving the
+  install quietly stale. The pull is fast-forward only on purpose: the clone
+  backs the whole toolchain, so a diverged clone stops with git's own error and
+  is left untouched, and the reinstall is gated on the pull succeeding. Install
+  through a package manager such as mise is not handled yet; a `git pull` inside
+  a manager-owned directory would fight the manager, so a non-git install just
+  fails the pull naturally and the manager's own update path is left for when one
+  ships.
 - **Issue backend (#77).** The issue tracker is selectable per repo with a
   `tracker:` config key: `github` (default) or `jira`. GitHub stays the zero-config
   default and is unchanged. On `jira`, sapa reads the issue from and records the
