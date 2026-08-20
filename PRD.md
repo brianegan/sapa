@@ -246,9 +246,12 @@ me through my existing notification hook, which opens the right window on click.
   assertion the model made in chat, and it died with the session, so two things
   were invisible: a step that did not really pass, and a gate that never had a bar.
   `sapa gate` now writes a record as it walks — per step the name, kind, command or
-  skill, model, result, duration, and an output tail, and per run the head and base
-  SHAs and which of four states the plan lookup landed in — and `sapa gate --report`
-  renders it as the PR's `## Gates` section. A PR gated by `format` alone reads as
+  skill, model, whether the step fell back off an unreachable pinned model, result,
+  duration, and an output tail, and per run the head and base SHAs and which of four
+  states the plan lookup landed in — and `sapa gate --report` renders it as the PR's
+  `## Gates` section. A step that fell back keeps the pin in the record as what was
+  asked for and renders as ran on the session model, so the section never asserts a
+  model that did not review (#138). A PR gated by `format` alone reads as
   visibly thin and a PR where no step saw the plan says so, but sapa never refuses
   to certify a weak gate and never scores one: enforcing a minimum would make
   adoption on someone else's repo a fight and is not sapa's call, while putting the
@@ -405,7 +408,14 @@ me through my existing notification hook, which opens the right window on click.
   a fresh-context reviewer avoids author-reviews-own-work bias regardless of
   model. `sapa gate` reads the key and reports it on the step's `needs-skill`
   line, but honouring it stays with the skill: pinning a model means spawning a
-  sub-agent, which needs the harness. Reserve
+  sub-agent, which needs the harness. The pin is a preference, not a requirement
+  (#138): when the harness cannot reach the pinned model — the account has no
+  access to it, or the harness has no such model, as Codex has no Fable — the
+  step falls back to the session model rather than failing the gate, so a stream
+  stays gateable by anyone who clones it. The skill catches the unreachable-model
+  error and re-spawns without the override, and the fallback is recorded through a
+  `--fell-back` flag so the PR reports the session model ran rather than asserting
+  the pin did (see the gate record below). Reserve
   positions: if cost tightens further, the advisor posture — Sonnet sessions
   with Fable pinned at plan and review — is the designed fallback at roughly 92%
   of solo quality for 63% of the price; if quality headroom is wanted later, the
