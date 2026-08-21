@@ -22,6 +22,7 @@
 #   section     maintain a machine-managed section of a PR body
 #   status      record the current stream's status for the window switcher
 #   gate        run the configured gate steps and emit one line per result
+#   skills      provision and verify the skills your .sapa.yaml references
 #   watch       poll the current branch's PR and emit one line per change
 #   teardown    remove a merged stream's worktree and local branch
 #   close       close a finished stream's editor window (a closer for teardown)
@@ -32,7 +33,7 @@
 
 set -euo pipefail
 
-commands="bootstrap worktree start issue config settings tmp section status gate watch teardown close install update uninstall completion"
+commands="bootstrap worktree start issue config settings tmp section status gate skills watch teardown close install update uninstall completion"
 
 usage() { grep '^#' "$0" | grep -v '^#!' | sed 's/^# \{0,1\}//'; }
 

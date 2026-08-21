@@ -361,13 +361,42 @@ def resolve_steps(gate: dict, path: str) -> list[dict]:
             raise ConfigError(f"gate step {name!r} has both `run:` and `skill:`")
         if not run and not skill:
             raise ConfigError(f"gate step {name!r} has neither `run:` nor `skill:`")
+        if run:
+            kind, target = "run", str(run)
+        else:
+            kind, target = "skill", skill_step_target(skill, name, path)
         steps.append({
             "name": name,
-            "kind": "run" if run else "skill",
-            "target": str(run or skill),
+            "kind": kind,
+            "target": target,
             "model": str(raw.get("model") or ""),
         })
     return steps
+
+
+def skill_step_target(skill, step_name: str, path: str) -> str:
+    """The skill a `skill:` step invokes. It may be a bare name (`code-review`)
+    or, when the skill is provisioned by `sapa skills`, an object that carries
+    its own source and pinned SHA; then the invocation name is its `name:` or the
+    last component of its `path:`. Kept in step with sapa-skills' own name rule."""
+    if isinstance(skill, str):
+        return skill
+    if isinstance(skill, dict):
+        name = skill.get("name")
+        if isinstance(name, str) and name:
+            return name
+        p = skill.get("path")
+        if isinstance(p, str):
+            base = os.path.basename(p.rstrip("/"))
+            if base and base != ".":
+                return base
+        raise ConfigError(
+            f"gate step {step_name!r} skill needs a resolvable name "
+            f"(a `name:` or a `path:` whose last component names it) in {path}"
+        )
+    raise ConfigError(
+        f"gate step {step_name!r} has a `skill:` that is neither a name nor a mapping in {path}"
+    )
 
 
 def remaining_steps(steps: list[dict], after: str | None) -> list[dict]:

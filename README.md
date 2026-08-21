@@ -95,6 +95,11 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
   `sapa-gate` resumes with `sapa gate --after <name>` and reports the outcome
   with `--result`/`--summary`. `sapa gate --report` renders the walk's record as
   the PR's `## Gates` section (see [The gate record](#the-gate-record)).
+- `sapa skills`: provision and verify the skills a `.sapa.yaml` references (see
+  [Provisioning skills](#provisioning-skills)). `enumerate` lists them, `lock`
+  pins each object-form skill to a commit SHA, `sync` vendors it into
+  `.claude/skills/<name>/`, `check` verifies (offline) the config and the
+  vendored folders agree, and `update` re-pins to the latest SHA and re-syncs.
 - `sapa watch`: poll the current branch's PR and emit one structured line per
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`). The `sapa-watch` skill runs it and reasons about each
@@ -207,6 +212,10 @@ default:
   writes (plan comment, PR body, review replies; for example `/humanizer`). It
   shapes prose only: the task list, `Done when:` lines, PR title, and gate
   record stay as written.
+
+  Each of `plan:`, `build:`, and `writing_style:` (and a gate step's `skill:`)
+  may be a bare skill name, as above, or an object that `sapa skills` provisions
+  at a pinned commit. See [Provisioning skills](#provisioning-skills).
 - `tracker:`: the issue backend, `github` (default) or `jira`. On `github`, sapa
   reads issues and records the plan through `gh`, and PRs link the issue with
   `Closes #N`. On `jira` it uses the Atlassian CLI (`acli`); PRs still live on
@@ -274,6 +283,46 @@ gate:
 The gate is the only thing that checks the work, and nothing downstream
 re-verifies it, so make the `gate.steps:` count: include a real test, analyze,
 and review step, not a token check.
+
+### Provisioning skills
+
+The flow and gate run skills the config names, so those skills have to be on the
+machine. `sapa skills` provisions them, pinned, so a fresh checkout runs with
+nothing installed by hand. A skill value is one of two shapes:
+
+- a **bare name** (`plan: grilling`) means "resolve it however you already do",
+  a global install. sapa leaves it alone.
+- an **object** means "provision this one". sapa vendors it from its source at a
+  pinned commit into `.claude/skills/<name>/`, the only place Claude Code
+  resolves a project skill:
+
+  ```yaml
+  plan:
+    source: mattpocock/skills           # owner/repo, a full git URL, or a local path
+    path: skills/productivity/grilling  # the skill folder within that repo ('.' = root)
+    sha: 0ab1b63a410a...                # the pinned commit, written by `lock`
+  writing_style:
+    source: blader/humanizer
+    path: .
+    name: humanizer                     # optional; defaults to the last path component
+  ```
+
+The name a gate `skill:` invokes, and the folder a skill vendors into, is the
+object's `name:` or the last component of its `path:`. The five verbs:
+
+- `sapa skills enumerate` prints every skill the config references.
+- `sapa skills lock` resolves each object's source HEAD to a `sha:` and writes it
+  back into `.sapa.yaml`, touching only that line.
+- `sapa skills sync` vendors each pinned skill into `.claude/skills/<name>/`,
+  carrying an upstream LICENSE for attribution (it refuses to vendor without one).
+- `sapa skills check` verifies, offline, that the object-form skills and the
+  vendored folders agree and each folder has a `SKILL.md`. Wire it into a setup
+  task and the gate so config and provisioned skills cannot drift.
+- `sapa skills update` re-pins every object to its latest source HEAD and
+  re-syncs, leaving a reviewable diff.
+
+Whether the vendored folders are committed (shared with the team) or gitignored
+is the project's `.gitignore` choice.
 
 ### Personal settings
 

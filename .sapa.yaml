@@ -2,14 +2,24 @@
 base: main
 # Open PRs ready for review rather than as drafts.
 pr: ready
-plan: grilling
+# The planning skill, provisioned by `sapa skills`: vendored from its source at a
+# pinned SHA into .claude/skills/grilling/. A bare `plan: grilling` would instead
+# mean "resolve it however you already do" and leave provisioning to you.
+plan:
+  source: mattpocock/skills
+  path: skills/productivity/grilling
+  sha: 0ab1b63a410a03d3627979a109c8695de27af954
 # A skill to shape the implementation, invoked once before the first task. Left
 # off here so sapa's own streams build as `/sapa-build` describes; turning it on
 # changes how every later stream is built, so it stays a deliberate flip:
 #   build: tdd
 # Shape the free prose sapa writes (plan comment, PR body, review replies) with a
 # skill, run as a final pass before recording. Omit to write plainly.
-writing_style: humanizer
+writing_style:
+  source: blader/humanizer
+  path: .
+  name: humanizer
+  sha: e2e92e7b4b8229253ed5c8e81dc65463fdeddda5
 # Issue backend. `github` (default) reads issues and records the plan on GitHub;
 # `jira` uses the Atlassian CLI (acli) and keeps PRs on GitHub. sapa's own repo
 # uses GitHub, so this is left at the default and shown here only as reference:
@@ -35,9 +45,17 @@ gate:
   # 0 means never autofix. Left at the default here, shown only as reference:
   #   max_fix_attempts: 3
   steps:
+    # Verify, offline, that the skills this config references are vendored under
+    # .claude/skills/ and vice versa. Invoked as bin/sapa (branch-local) so a
+    # stream that adds the verb gates against its own code, not main's clone.
+    - name: skills
+      run: bin/sapa skills check
     # A step can invoke a skill...
     - name: review
-      skill: code-review
+      skill:
+        source: mattpocock/skills
+        path: skills/engineering/code-review
+        sha: 0ab1b63a410a03d3627979a109c8695de27af954
       # Pin review to the strongest model; sessions can run cheaper (see PRD).
       model: fable
     # ...or run a shell command (prefix with a version manager if needed). The
