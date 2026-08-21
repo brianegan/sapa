@@ -261,6 +261,13 @@ inherit the session model. The recommended posture: run sessions on Opus and pin
 the review step to Fable, so the strongest model's judgment lands on the one step
 that is bounded, token-light, and needs no mid-task conversation.
 
+The pin is a preference, not a requirement. When the harness cannot reach the
+pinned model — the running account has no access to it, or the harness has no such
+model, as Codex has no Fable — the step falls back to the session model and the
+gate still runs, so a stream stays gateable by anyone who clones it. The fallback
+is recorded, not hidden: the gate report says the step ran on the session model
+rather than asserting the pin ran.
+
 ```yaml
 base: main
 remote: origin
@@ -366,9 +373,9 @@ silently.
 
 The gate writes down what it did, and the PR publishes it. As `sapa gate` walks,
 it appends to `$(sapa tmp)/gate-record.json`: per step the name, kind, command or
-skill, model pin, result, duration, and a tail of its output, and per run the
-head and base SHAs it gated plus whether any step was given the recorded plan as
-its spec source. `sapa-submit` then puts a summary on the PR:
+skill, model pin, whether the step fell back off an unreachable pinned model,
+result, duration, and a tail of its output, and per run the head and base SHAs it
+gated plus whether any step was given the recorded plan as its spec source. `sapa-submit` then puts a summary on the PR:
 
 ```text
 ## Gates
@@ -382,9 +389,11 @@ Reviewed against the plan recorded on the issue.
 ```
 
 A gate of one `format` step renders as one bullet and reads as thin, and a PR
-where nothing was given the plan says so. That is the design: disclosure, not
-enforcement. Sapa will not refuse to certify a weak gate; it puts the truth where
-the reviewer is and lets them judge.
+where nothing was given the plan says so. A step whose pinned model was
+unreachable renders as ``pinned `fable` unreachable, ran on the session model``
+rather than asserting the pin, so the bullet never claims a model that did not review.
+That is the design: disclosure, not enforcement. Sapa will not refuse to certify
+a weak gate; it puts the truth where the reviewer is and lets them judge.
 
 The section also distinguishes two kinds of evidence: a `run:` step's result is
 an exit code sapa watched, while a `skill:` step's is what the agent reported and

@@ -243,3 +243,35 @@ findings verbatim. Treat the sub-agent's findings as the step result, exactly as
 an in-session invocation would be. Sub-agents the skill itself spawns inherit the
 pinned model, so a review skill's parallel reviewers run on it too. With `-`,
 invoke the skill in-session with the same spec path.
+
+A pinned model is a preference, not a requirement: it names the model to review
+on when the harness can reach it, and the gate still runs when it cannot. So when
+that pinned spawn comes back an error because the harness cannot reach the model
+— the account has no access to it, or the harness has no such model at all — do
+not fail the step, and do not drop to the in-session `-` path. Re-spawn the same
+step as a sub-agent with no model override, so it runs on the session model, and
+treat its findings as the step result exactly as the pinned spawn would have. The
+fallback drops the override, not the isolation: it stays a sub-agent so review
+keeps its own context.
+
+Report the fallback rather than hide it. Say it in one line where it happens,
+naming the pinned model and that review ran on the session model instead, so
+whoever is gating right now sees it. Then resume the walk with `--fell-back` on
+the `--after` call — `sapa gate --after <name> --result pass|fail --fell-back
+--summary "…"` — which records that the pin was unreachable so the gate report
+says review ran on the session model rather than asserting the pinned model ran.
+That is the same disclosure the `absent`-plan case above puts on the PR; a silent
+fallback would leave the report claiming the pinned model reviewed the change when
+it did not. The re-spawn is the same review on a different model, not a fix, so it
+spends no `max_fix_attempts` attempt.
+
+The trigger is unreachability, not any error. The harness surfaces an unreachable
+model as a visible error rather than a quiet run on another model — a model it
+does not accept at all is refused at the call, and one the account cannot use
+errors at spawn — so the pinned spawn is itself the check: read the error, and if
+it means the model is unreachable, drop the override and spawn again. Do not fall
+back on a transient fault such as a rate limit, an overload, or a timeout, which
+is not unreachability; let that fail the step and be handled like any other
+failing spawn rather than quietly downgrading the review. Do not pre-check access
+before spawning either — there is nothing to consult, and a spawn that succeeds
+needed no fallback.

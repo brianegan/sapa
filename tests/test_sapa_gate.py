@@ -737,6 +737,22 @@ def test_a_resume_with_no_record_walks_from_the_top():
 
 
 @case
+def test_a_non_resumable_resume_keeps_the_fell_back_flag_with_it():
+    """`--fell-back` is part of the reported outcome, so a resume carrying only it
+    (result defaulted to pass) must warn to report it again when the record cannot be
+    resumed. Without that, the fallback silently vanishes and the report claims the
+    pinned model ran."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(run_step("first", "echo first >> first.txt"),
+                                 skill_step("review", "code-review", "fable"),
+                                 run_step("last", "echo last > last.txt")))
+        p = repo.run("--after", "review", "--fell-back", plan="a plan")  # no record → restart
+        assert p.returncode == 4, p.stderr
+        assert "walking from the first step" in p.stderr, p.stderr
+        assert "report it again" in p.stderr, p.stderr
+
+
+@case
 def test_a_resume_with_an_unparseable_record_walks_from_the_top():
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, RESTART_GATE)
@@ -1124,6 +1140,56 @@ def test_report_lists_the_steps_that_ran_by_name():
         assert "echo hi" not in out, "the report printed the command"
         assert "Reviewed against the plan recorded on the issue." in out, out
         assert f"Gated `{repo.sha()[:7]}` against `origin/main@{repo.sha('origin/main')[:7]}`." in out, out
+
+
+@case
+def test_report_shows_a_fallback_to_the_session_model():
+    """A `skill:` step whose pinned model was unreachable resumes with `--fell-back`,
+    and the report says it ran on the session model rather than asserting the pin
+    ran. `on `fable`` there would be a false claim: the pinned model never reviewed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(skill_step("review", "code-review", "fable"),
+                                 run_step("test", "echo hi")))
+        repo.run(plan="a plan")
+        repo.run("--after", "review", "--result", "pass", "--fell-back", plan="a plan")
+        out = repo.run("--report").stdout
+        assert "- **review**: skill `code-review`, pinned `fable` unreachable, " \
+               "ran on the session model, passed, agent-reported" in out, out
+        assert "on `fable`, passed" not in out, "the report still claimed the pin ran"
+
+
+@case
+def test_fell_back_without_after_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, SKILL_GATE)
+        p = repo.run("--fell-back")
+        assert p.returncode == 2, p.returncode
+        assert "--after" in p.stderr, p.stderr
+
+
+@case
+def test_fell_back_on_a_run_step_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(run_step("test", "true"),
+                                 run_step("later", "true")))
+        repo.run()
+        p = repo.run("--after", "test", "--fell-back")
+        assert p.returncode == 2, p.returncode
+        assert "run:" in p.stderr, p.stderr
+
+
+@case
+def test_fell_back_on_an_unpinned_skill_step_exits_2():
+    """A fallback is meaningless without a pin to fall back from, and the report only
+    renders it where there is a pinned model to name. `--fell-back` on an unpinned
+    skill step is refused rather than recorded as a flag the report would drop."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(skill_step("review", "code-review"),
+                                 run_step("test", "true")))
+        repo.run(plan="a plan")
+        p = repo.run("--after", "review", "--result", "pass", "--fell-back", plan="a plan")
+        assert p.returncode == 2, p.returncode
+        assert "no `model:` pin" in p.stderr, p.stderr
 
 
 @case

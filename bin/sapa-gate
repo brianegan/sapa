@@ -36,7 +36,7 @@ one):
 A `skill:` step needs the agent harness, so the helper stops when it reaches one
 rather than trying to run it: it emits `needs-skill` and exits 4. The skill
 invokes it and resumes the walk with `--after <name>`, carrying the step's outcome
-back on the same call as `--result`/`--summary`. Stopping (instead of running every
+back on the same call as `--result`/`--summary`/`--fell-back`. Stopping (instead of running every
 `run:` step in one pass and reporting the skill steps at the end) is what keeps the
 configured order and the fail-fast behaviour intact — a gate that declares `review`
 before `test` must not silently become `test` then `review`.
@@ -58,7 +58,8 @@ the report reads the last run. Old runs age out past MAX_RUNS.
 Each run stamps the head and base SHAs it gated, its scope (always `full` here),
 which fix attempt it is checking, its result, and which of four states the plan
 lookup landed in. Each step records
-its name, kind, command or skill, model, result, duration, and a tail of its output.
+its name, kind, command or skill, model, whether it fell back off an unreachable
+pinned model, result, duration, and a tail of its output.
 
 A `run:` step's result is an exit code the helper watched. A `skill:` step's is what
 the agent reported on the resume call, and is stored (and printed) marked as such,
@@ -125,7 +126,8 @@ Exit codes:
        resumed with `--result fail`. The walk stops there either way.
     2  a config or usage error — a caller outside a git worktree, no config, no
        `gate:` map, no `gate.steps:`, a malformed step or budget, an unknown
-       `--after` name, `--result` without `--after` or against a `run:` step,
+       `--after` name, `--result`/`--summary`/`--fell-back` without `--after` or
+       against a `run:` step, `--fell-back` on an unpinned `skill:` step,
        `--fix-attempt` with `--after`, or PyYAML missing. `--report` reads no
        config, so of these it raises only the first
     4  stopped at a `skill:` step awaiting dispatch
@@ -137,6 +139,8 @@ Usage:
     sapa gate --after NAME     # resume with the step after NAME (a handled skill)
       --result pass|fail       #   what that skill step reported (default pass)
       --summary TEXT           #   one line on what it found
+      --fell-back              #   its pinned model was unreachable; it ran on the
+                               #   session model, and the report says so
     sapa gate --list           # print the resolved steps, run nothing
     sapa gate --report         # print the `## Gates` section, run nothing
     sapa gate --start DIR      # resolve the worktree from DIR instead of $PWD
@@ -591,7 +595,8 @@ def resumable(record: dict | None, steps: list[dict], after: str) -> bool:
     return [s.get("name") for s in run.get("steps", [])] == expected
 
 
-def skill_entry(step: dict, result: str | None, summary: str | None) -> dict:
+def skill_entry(step: dict, result: str | None, summary: str | None,
+                fell_back: bool = False) -> dict:
     """The record entry for a `skill:` step, built from what the agent reported back.
 
     `reported_by` is the point of the whole thing. The helper never ran this step, so
@@ -602,12 +607,18 @@ def skill_entry(step: dict, result: str | None, summary: str | None) -> dict:
     A resume that says nothing counts as a reported pass: continuing the walk is the
     agent's judgement that the step passed, and it is honest to record that as what
     it is rather than leave the step out of the account entirely.
+
+    `fell_back` records that the pinned model was unreachable and the step ran on the
+    session model instead. `model` stays the pin, because that is what the config
+    asked for; the flag is what keeps the report from asserting the pin ran when it
+    did not, the same disclosure the record exists for.
     """
     return {
         "name": step["name"],
         "kind": "skill",
         "target": step["target"],
         "model": step["model"] or None,
+        "fell_back": fell_back,
         "result": result or "pass",
         "summary": summary or None,
         "reported_by": "agent",
@@ -792,8 +803,13 @@ def render_step(step: dict) -> str:
     passed = step.get("result") == "pass"
     if step.get("kind") == "skill":
         what = f"skill `{step.get('target', '?')}`"
-        if step.get("model"):
-            what += f" on `{step['model']}`"
+        model = step.get("model")
+        if model and step.get("fell_back"):
+            # The pin was unreachable, so the step ran on the session model. Say both,
+            # rather than let `on <pin>` assert a model that never ran the review.
+            what += f", pinned `{model}` unreachable, ran on the session model"
+        elif model:
+            what += f" on `{model}`"
         # Said out loud on every skill bullet: the helper did not run this step, so
         # "passed" here is the agent's report, not an exit code sapa watched.
         return f"- **{name}**: {what}, {'passed' if passed else 'failed'}, agent-reported"
@@ -865,7 +881,7 @@ def report(start: str) -> int:
 
 def gate(start: str, after: str | None, list_only: bool,
          result: str | None = None, summary: str | None = None,
-         fix_attempt: bool = False) -> int:
+         fix_attempt: bool = False, fell_back: bool = False) -> int:
     # Discovery is seeded from the tree, not the caller's cwd, so the config that
     # supplies the steps and the directory they run in cannot come apart.
     root = worktree_root(start)
@@ -890,13 +906,23 @@ def gate(start: str, after: str | None, list_only: bool,
     # Usage errors first, before anything looks at the record: whether these flags
     # make sense is a question about the arguments and the config, and answering it
     # after a restart has already dropped `--after` would swallow the mistake.
-    if (result or summary) and not after:
-        raise ConfigError("--result and --summary describe the step named by --after, "
-                          "which was not given")
-    if (result or summary) and next(
+    if (result or summary or fell_back) and not after:
+        raise ConfigError("--result, --summary and --fell-back describe the step named "
+                          "by --after, which was not given")
+    if (result or summary or fell_back) and next(
             (s["kind"] for s in steps if s["name"] == after), "skill") != "skill":
-        raise ConfigError(f"--result and --summary report a `skill:` step's outcome, "
-                          f"but {after!r} is a `run:` step the gate ran itself")
+        raise ConfigError(f"--result, --summary and --fell-back report a `skill:` step's "
+                          f"outcome, but {after!r} is a `run:` step the gate ran itself")
+    if fell_back:
+        # Falling back means an unreachable *pinned* model, so it is meaningless on an
+        # unpinned step, and the report only renders the fallback where there is a pin
+        # to name. Refuse it rather than record a flag the report would silently drop.
+        pin = next((s["model"] for s in steps if s["name"] == after), None)
+        # `pin == ""` is a named step with no pin; `None` is an unknown name that
+        # `remaining_steps` reports below, so leave that to it.
+        if pin == "":
+            raise ConfigError(f"--fell-back reports the pinned model for {after!r} was "
+                              f"unreachable, but it has no `model:` pin to fall back from")
     if fix_attempt and after:
         raise ConfigError("--fix-attempt marks a re-run of the whole gate after a fix, "
                           "but --after resumes the walk already in progress, which is "
@@ -929,13 +955,14 @@ def gate(start: str, after: str | None, list_only: bool,
         sys.stderr.write(f"sapa gate: no gate record covering the steps before {after!r}; "
                          f"walking from the first step so the record can't understate "
                          f"what ran\n")
-        if result or summary:
-            # Said out loud because the alternative is a reported failure vanishing:
+        if result or summary or fell_back:
+            # Said out loud because the alternative is a reported outcome vanishing:
             # the restart has no run to attach it to, and the walk that follows will
-            # reach the step again and ask for the verdict a second time.
+            # reach the step again and ask for the verdict a second time. `--fell-back`
+            # is part of that outcome, so it goes with the restart too.
             sys.stderr.write(f"sapa gate: the reported outcome for {after!r} goes with "
                              f"it — report it again when the walk reaches that step\n")
-        after, todo, result, summary = None, steps, None, None
+        after, todo, result, summary, fell_back = None, steps, None, None, False
 
     if after is None:
         # A bare invocation is a new run, appended rather than replacing: #99 gates the
@@ -948,7 +975,7 @@ def gate(start: str, after: str | None, list_only: bool,
         # Record the skill step the agent just handled, before walking on past it.
         handled = next(s for s in steps if s["name"] == after)
         if handled["kind"] == "skill":
-            entry = skill_entry(handled, result, summary)
+            entry = skill_entry(handled, result, summary, fell_back)
             record["runs"][-1]["steps"].append(entry)
             save_record(rec_path, record)
             emit("step", handled["name"], "skill", entry["result"], "-")
@@ -993,6 +1020,10 @@ def main() -> int:
                              "(default pass, since resuming means it passed)")
     parser.add_argument("--summary", metavar="TEXT",
                         help="with --after: one line on what the skill step found")
+    parser.add_argument("--fell-back", action="store_true",
+                        help="with --after: the step's pinned model was unreachable, "
+                             "so it ran on the session model; the report says so "
+                             "instead of asserting the pin ran")
     parser.add_argument("--fix-attempt", action="store_true",
                         help="this run re-checks a fix sapa applied itself; counts "
                              "against `gate.max_fix_attempts` and is refused once "
@@ -1010,7 +1041,7 @@ def main() -> int:
         if args.report:
             return report(os.path.abspath(args.start))
         return gate(os.path.abspath(args.start), args.after, args.list_only,
-                    args.result, args.summary, args.fix_attempt)
+                    args.result, args.summary, args.fix_attempt, args.fell_back)
     except ConfigError as exc:
         sys.stderr.write(f"sapa gate: {exc}\n")
         return EXIT_CONFIG
