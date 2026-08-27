@@ -207,6 +207,10 @@ TAIL_LINES = 40
 TAIL_CHARS = 4000
 TAIL_KEEP_BYTES = 65536  # raw bytes held while streaming, trimmed down at the end
 
+WHEN_ALWAYS = "always"
+WHEN_PRE_PUSH = "pre-push"
+STEP_WHENS = (WHEN_ALWAYS, WHEN_PRE_PUSH)
+
 # CSI sequences and the shorter two-byte escapes. Colors are worth having on the
 # terminal and worth not having in a JSON field a human reads.
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
@@ -370,17 +374,19 @@ def resolve_steps(gate: dict, path: str) -> list[dict]:
             kind, target = "run", str(run)
         else:
             kind, target = "skill", skill_step_target(skill, name, path)
-        when = raw["when"] if "when" in raw else "always"
-        if not isinstance(when, str) or when not in ("always", "pre-push"):
+        when = raw["when"] if "when" in raw else WHEN_ALWAYS
+        if not isinstance(when, str) or when not in STEP_WHENS:
             raise ConfigError(
-                f"gate step {name!r} has `when: {when}`; expected `always` or `pre-push`"
+                f"gate step {name!r} has `when: {when}`; expected "
+                f"`{WHEN_ALWAYS}` or `{WHEN_PRE_PUSH}`"
             )
-        if when == "pre-push":
+        if when == WHEN_PRE_PUSH:
             saw_pre_push = True
         elif saw_pre_push:
             raise ConfigError(
-                f"gate step {name!r} has `when: always` after a `pre-push` step; "
-                f"put every `always` step before the first `pre-push` step"
+                f"gate step {name!r} has `when: {WHEN_ALWAYS}` after a "
+                f"`{WHEN_PRE_PUSH}` step; put every `{WHEN_ALWAYS}` step before "
+                f"the first `{WHEN_PRE_PUSH}` step"
             )
         steps.append({
             "name": name,
@@ -588,7 +594,8 @@ def new_run(cwd: str, base: str, remote: str, attempt: int) -> dict:
     }
 
 
-def resumable(record: dict | None, steps: list[dict], after: str) -> bool:
+def resumable(record: dict | None, steps: list[dict], after: str,
+              head: str | None) -> bool:
     """True when the record's current run really covers everything before `after`.
 
     A resume appends to the last run, so that run has to be the one that stopped at
@@ -604,9 +611,11 @@ def resumable(record: dict | None, steps: list[dict], after: str) -> bool:
     run = record["runs"][-1]
     if run.get("result") != "incomplete":
         return False
+    if run.get("head_sha") != head:
+        return False
     names = [s["name"] for s in steps]
     expected = [(s["name"], s["when"]) for s in steps[:names.index(after)]]
-    recorded = [(s.get("name"), s.get("when", "always"))
+    recorded = [(s.get("name"), s.get("when", WHEN_ALWAYS))
                 for s in run.get("steps", [])]
     return recorded == expected
 
@@ -818,7 +827,8 @@ def render_step(step: dict) -> str:
     who wants the command has it without the report carrying a 500-character chain.
     """
     name = step.get("name", "?")
-    schedule = " (pre-push)" if step.get("when") == "pre-push" else ""
+    schedule = (" (pre-push)"
+                if step.get("when") == WHEN_PRE_PUSH else "")
     passed = step.get("result") == "pass"
     if step.get("kind") == "skill":
         what = f"skill `{step.get('target', '?')}`"
@@ -972,7 +982,7 @@ def gate(start: str, after: str | None, list_only: bool,
             emit("attempts", spent, budget)
             return EXIT_ATTEMPTS_SPENT
 
-    if after and not resumable(record, steps, after):
+    if after and not resumable(record, steps, after, git_sha("HEAD", root)):
         sys.stderr.write(f"sapa gate: no gate record covering the steps before {after!r}; "
                          f"walking from the first step so the record can't understate "
                          f"what ran\n")

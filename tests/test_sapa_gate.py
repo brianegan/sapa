@@ -866,6 +866,27 @@ def test_a_resume_after_the_schedule_changed_walks_from_the_top():
 
 
 @case
+def test_a_resume_after_head_changed_walks_from_always_for_each_schedule():
+    for skill_when in ("always", "pre-push"):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(tmp, gate_of(
+                run_step("first", "echo first >> first.txt"),
+                skill_step("review", "code-review", when=skill_when),
+                run_step("last", "echo last > last.txt", when="pre-push"),
+            ))
+            repo.run(plan="a plan")
+
+            write(os.path.join(repo.dir, "changed.txt"), "changed during review\n")
+            git(repo.dir, "add", "changed.txt")
+            git(repo.dir, "commit", "-qm", "change during review")
+            p = repo.run("--after", "review", plan="a plan")
+
+            assert_restarted(repo, p)
+            assert repo.read("first.txt") == "first\nfirst\n", \
+                f"{skill_when}: the always step did not restart"
+
+
+@case
 def test_the_restart_does_not_discard_earlier_runs():
     with tempfile.TemporaryDirectory() as tmp:
         repo = Repo(tmp, RESTART_GATE)
