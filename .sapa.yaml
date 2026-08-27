@@ -50,7 +50,12 @@ gate:
     # stream that adds the verb gates against its own code, not main's clone.
     - name: skills
       run: bin/sapa skills check
-    # A step can invoke a skill...
+    # A step can run a shell command (prefix with a version manager if needed). The
+    # runner is the only list of test files, so the gate and CI run the same suite.
+    - name: test
+      run: bash tests/run.sh
+    # Or invoke a skill. Defer the expensive review until the always-run commands
+    # are green; this is a gate schedule, not a Git hook.
     - name: review
       skill:
         source: mattpocock/skills
@@ -58,7 +63,4 @@ gate:
         sha: 0ab1b63a410a03d3627979a109c8695de27af954
       # Pin review to the strongest model; sessions can run cheaper (see PRD).
       model: fable
-    # ...or run a shell command (prefix with a version manager if needed). The
-    # runner is the only list of test files, so the gate and CI run the same suite.
-    - name: test
-      run: bash tests/run.sh
+      when: pre-push

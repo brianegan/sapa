@@ -272,14 +272,14 @@ def lines(stdout):
     return out
 
 
-def run_step(name, command):
+def run_step(name, command, when=None):
     """A `run:` step as a value, so a case spells steps rather than YAML text."""
-    return {"name": name, "run": command}
+    return {"name": name, "run": command, "when": when}
 
 
-def skill_step(name, skill, model=None):
+def skill_step(name, skill, model=None, when=None):
     """A `skill:` step as a value, so a case spells steps rather than YAML text."""
-    return {"name": name, "skill": skill, "model": model}
+    return {"name": name, "skill": skill, "model": model, "when": when}
 
 
 def gate_of(*steps, attempts=None, base=None):
@@ -302,6 +302,8 @@ def gate_of(*steps, attempts=None, base=None):
             out += f"      skill: {step['skill']}\n"
             if step["model"] is not None:
                 out += f"      model: {step['model']}\n"
+        if step.get("when") is not None:
+            out += f"      when: {step['when']}\n"
     return out
 
 
@@ -318,13 +320,14 @@ def case(fn):
 @case
 def test_list_prints_each_step_with_kind_and_model():
     with tempfile.TemporaryDirectory() as tmp:
-        repo = Repo(tmp, gate_of(skill_step("review", "code-review", "fable"),
-                                 run_step("test", "echo hi")))
+        repo = Repo(tmp, gate_of(run_step("test", "echo hi"),
+                                 skill_step("review", "code-review", "fable",
+                                            when="pre-push")))
         p = repo.run("--list")
         assert p.returncode == 0, p.stderr
         assert lines(p.stdout) == [
-            ["list", "review", "skill", "code-review", "fable"],
-            ["list", "test", "run", "echo hi", "-"],
+            ["list", "test", "run", "echo hi", "-", "always"],
+            ["list", "review", "skill", "code-review", "fable", "pre-push"],
         ], p.stdout
 
 
@@ -355,9 +358,9 @@ def test_object_form_skill_resolves_to_its_invocation_name():
         p = Repo(tmp, config).run("--list")
         assert p.returncode == 0, p.stderr
         assert lines(p.stdout) == [
-            ["list", "review", "skill", "code-review", "fable"],
-            ["list", "style", "skill", "humanizer", "-"],
-            ["list", "test", "run", "true", "-"],
+            ["list", "review", "skill", "code-review", "fable", "always"],
+            ["list", "style", "skill", "humanizer", "-", "always"],
+            ["list", "test", "run", "true", "-", "always"],
         ], p.stdout
 
 
@@ -382,6 +385,14 @@ def test_malformed_configs_exit_2_with_a_reason():
         "duplicate names": ("gate:\n  steps:\n    - name: x\n      run: 'true'\n"
                             "    - name: x\n      run: 'true'\n"),
         "step not a mapping": "gate:\n  steps:\n    - just a string\n",
+        "unknown when": ("gate:\n  steps:\n    - name: x\n      run: 'true'\n"
+                         "      when: sometimes\n"),
+        "non-string when": ("gate:\n  steps:\n    - name: x\n      run: 'true'\n"
+                            "      when: true\n"),
+        "always after pre-push": (
+            "gate:\n  steps:\n    - name: slow\n      run: 'true'\n"
+            "      when: pre-push\n    - name: fast\n      run: 'true'\n"
+            "      when: always\n"),
     }
     for label, config in bad.items():
         with tempfile.TemporaryDirectory() as tmp:
@@ -478,6 +489,55 @@ def test_steps_run_in_order_and_report_exit_and_duration():
             ["step", "one", "run", "0"], ["step", "two", "run", "0"]], emitted
         assert all(float(e[4]) >= 0 for e in emitted[:2]), emitted
         assert emitted[-1] == ["done", "green"], emitted
+
+
+@case
+def test_pre_push_steps_run_once_after_every_always_step_is_green():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(
+            run_step("format", "echo format >> order.txt"),
+            run_step("test", "echo test >> order.txt"),
+            run_step("review", "echo review >> order.txt", when="pre-push"),
+        ))
+        p = repo.run()
+        assert p.returncode == 0, p.stderr
+        assert repo.read("order.txt") == "format\ntest\nreview\n", repo.read("order.txt")
+        assert [s["when"] for s in repo.runs()[0]["steps"]] == [
+            "always", "always", "pre-push"], repo.runs()[0]["steps"]
+
+
+@case
+def test_a_failed_always_step_never_reaches_pre_push_steps():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(
+            run_step("test", "exit 1"),
+            run_step("review", "echo review > review.txt", when="pre-push"),
+        ))
+        p = repo.run()
+        assert p.returncode == 1, p.returncode
+        assert not repo.has("review.txt"), "a pre-push step ran before always was green"
+
+
+@case
+def test_a_fix_attempt_restarts_at_always_before_pre_push():
+    with tempfile.TemporaryDirectory() as tmp:
+        config = gate_of(
+            run_step("test", "echo test >> order.txt"),
+            run_step("review", "echo review >> order.txt; test -f fixed.txt",
+                     when="pre-push"),
+        )
+        repo = Repo(tmp, config)
+        assert repo.run().returncode == 1, "the first pre-push check did not fail"
+
+        write(os.path.join(repo.dir, "fixed.txt"), "fixed\n")
+        git(repo.dir, "add", "fixed.txt")
+        git(repo.dir, "commit", "-qm", "fix review")
+        p = repo.run("--fix-attempt")
+
+        assert p.returncode == 0, p.stderr
+        assert repo.read("order.txt") == "test\nreview\ntest\nreview\n", \
+            repo.read("order.txt")
+        assert repo.runs()[-1]["head_sha"] == repo.sha(), repo.runs()[-1]
 
 
 @case
@@ -637,6 +697,7 @@ def test_a_resume_records_the_skill_step_the_agent_handled():
         assert step["kind"] == "skill", step
         assert step["target"] == "code-review", step
         assert step["model"] == "fable", step
+        assert step["when"] == "always", step
         assert step["result"] == "pass", step
         assert step["summary"] == "3 findings, none blocking", step
         assert step["reported_by"] == "agent", step
@@ -784,6 +845,22 @@ def test_a_resume_whose_run_does_not_cover_the_earlier_steps_walks_from_the_top(
              "base_ref": "origin/main", "base_sha": None, "head_sha": None,
              "spec_source": "not-looked-up", "steps": []},
         ]}))
+        p = repo.run("--after", "review", plan="a plan")
+        assert_restarted(repo, p)
+
+
+@case
+def test_a_resume_after_the_schedule_changed_walks_from_the_top():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(
+            run_step("first", "echo first >> first.txt"),
+            skill_step("review", "code-review", when="pre-push"),
+        ))
+        repo.run(plan="a plan")
+        write(os.path.join(repo.dir, ".sapa.yaml"), gate_of(
+            run_step("first", "echo first >> first.txt", when="pre-push"),
+            skill_step("review", "code-review", when="pre-push"),
+        ))
         p = repo.run("--after", "review", plan="a plan")
         assert_restarted(repo, p)
 
@@ -1097,6 +1174,7 @@ def test_a_step_entry_carries_its_command_and_model():
         assert step["target"] == "echo hi", step
         assert step["kind"] == "run", step
         assert step["model"] is None, step
+        assert step["when"] == "always", step
         assert step["duration"] >= 0, step
 
 
@@ -1140,6 +1218,21 @@ def test_report_lists_the_steps_that_ran_by_name():
         assert "echo hi" not in out, "the report printed the command"
         assert "Reviewed against the plan recorded on the issue." in out, out
         assert f"Gated `{repo.sha()[:7]}` against `origin/main@{repo.sha('origin/main')[:7]}`." in out, out
+
+
+@case
+def test_report_marks_only_deferred_steps_as_pre_push():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Repo(tmp, gate_of(
+            run_step("test", "true"),
+            skill_step("review", "code-review", when="pre-push"),
+        ))
+        repo.run(plan="a plan")
+        repo.run("--after", "review", plan="a plan")
+        out = repo.run("--report").stdout
+        assert "- **test**: command, passed" in out, out
+        assert "- **test** (pre-push)" not in out, out
+        assert "- **review** (pre-push): skill `code-review`" in out, out
 
 
 @case

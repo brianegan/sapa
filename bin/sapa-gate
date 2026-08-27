@@ -31,7 +31,7 @@ one):
     sapa-gate  needs-skill  <name>  <skill>  <model-or-->
     sapa-gate  attempts     <spent>  <max>
     sapa-gate  done         green
-    sapa-gate  list         <name>  <kind>  <command-or-skill>  <model-or-->
+    sapa-gate  list         <name>  <kind>  <command-or-skill>  <model-or-->  <when>
 
 A `skill:` step needs the agent harness, so the helper stops when it reaches one
 rather than trying to run it: it emits `needs-skill` and exits 4. The skill
@@ -58,8 +58,8 @@ the report reads the last run. Old runs age out past MAX_RUNS.
 Each run stamps the head and base SHAs it gated, its scope (always `full` here),
 which fix attempt it is checking, its result, and which of four states the plan
 lookup landed in. Each step records
-its name, kind, command or skill, model, whether it fell back off an unreachable
-pinned model, result, duration, and a tail of its output.
+its name, kind, command or skill, model, schedule, whether it fell back off an
+unreachable pinned model, result, duration, and a tail of its output.
 
 A `run:` step's result is an exit code the helper watched. A `skill:` step's is what
 the agent reported on the resume call, and is stored (and printed) marked as such,
@@ -350,6 +350,7 @@ def resolve_steps(gate: dict, path: str) -> list[dict]:
 
     steps = []
     seen = set()
+    saw_pre_push = False
     for i, raw in enumerate(raw_steps, 1):
         where = f"gate step {i} in {path}"
         if not isinstance(raw, dict):
@@ -369,11 +370,24 @@ def resolve_steps(gate: dict, path: str) -> list[dict]:
             kind, target = "run", str(run)
         else:
             kind, target = "skill", skill_step_target(skill, name, path)
+        when = raw["when"] if "when" in raw else "always"
+        if not isinstance(when, str) or when not in ("always", "pre-push"):
+            raise ConfigError(
+                f"gate step {name!r} has `when: {when}`; expected `always` or `pre-push`"
+            )
+        if when == "pre-push":
+            saw_pre_push = True
+        elif saw_pre_push:
+            raise ConfigError(
+                f"gate step {name!r} has `when: always` after a `pre-push` step; "
+                f"put every `always` step before the first `pre-push` step"
+            )
         steps.append({
             "name": name,
             "kind": kind,
             "target": target,
             "model": str(raw.get("model") or ""),
+            "when": when,
         })
     return steps
 
@@ -591,8 +605,10 @@ def resumable(record: dict | None, steps: list[dict], after: str) -> bool:
     if run.get("result") != "incomplete":
         return False
     names = [s["name"] for s in steps]
-    expected = names[:names.index(after)]
-    return [s.get("name") for s in run.get("steps", [])] == expected
+    expected = [(s["name"], s["when"]) for s in steps[:names.index(after)]]
+    recorded = [(s.get("name"), s.get("when", "always"))
+                for s in run.get("steps", [])]
+    return recorded == expected
 
 
 def skill_entry(step: dict, result: str | None, summary: str | None,
@@ -618,6 +634,7 @@ def skill_entry(step: dict, result: str | None, summary: str | None,
         "kind": "skill",
         "target": step["target"],
         "model": step["model"] or None,
+        "when": step["when"],
         "fell_back": fell_back,
         "result": result or "pass",
         "summary": summary or None,
@@ -764,6 +781,7 @@ def run_step(step: dict, cwd: str, base: str, changed: str) -> dict:
         "kind": "run",
         "target": step["target"],
         "model": step["model"] or None,
+        "when": step["when"],
         "result": "pass" if code == 0 else "fail",
         "exit": code,
         "duration": duration,
@@ -800,6 +818,7 @@ def render_step(step: dict) -> str:
     who wants the command has it without the report carrying a 500-character chain.
     """
     name = step.get("name", "?")
+    schedule = " (pre-push)" if step.get("when") == "pre-push" else ""
     passed = step.get("result") == "pass"
     if step.get("kind") == "skill":
         what = f"skill `{step.get('target', '?')}`"
@@ -812,12 +831,13 @@ def render_step(step: dict) -> str:
             what += f" on `{model}`"
         # Said out loud on every skill bullet: the helper did not run this step, so
         # "passed" here is the agent's report, not an exit code sapa watched.
-        return f"- **{name}**: {what}, {'passed' if passed else 'failed'}, agent-reported"
+        return (f"- **{name}**{schedule}: {what}, "
+                f"{'passed' if passed else 'failed'}, agent-reported")
     duration = step.get("duration")
     secs = f"{duration:.1f}s" if isinstance(duration, (int, float)) else ""
     if passed:
-        return f"- **{name}**: command, passed" + (f" in {secs}" if secs else "")
-    return (f"- **{name}**: command, failed (exit {step.get('exit', '?')})"
+        return f"- **{name}**{schedule}: command, passed" + (f" in {secs}" if secs else "")
+    return (f"- **{name}**{schedule}: command, failed (exit {step.get('exit', '?')})"
             + (f" after {secs}" if secs else ""))
 
 
@@ -895,7 +915,8 @@ def gate(start: str, after: str | None, list_only: bool,
 
     if list_only:
         for step in steps:
-            emit("list", step["name"], step["kind"], step["target"], step["model"] or "-")
+            emit("list", step["name"], step["kind"], step["target"],
+                 step["model"] or "-", step["when"])
         return EXIT_OK
 
     base = str(cfg.get("base") or "main")

@@ -91,6 +91,8 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
   `sapa-flow` reads it to resume a stream at the phase it left off in.
 - `sapa gate`: walk the configured `gate.steps:` in order (`run:` steps get
   `SAPA_BASE` and `SAPA_CHANGED_FILES`; `skill:` steps get the plan comment).
+  Steps default to `when: always`; `when: pre-push` defers an expensive step
+  until every always-run step is green.
   It stops at a `skill:` step (exit 4), since invoking a skill needs the agent;
   `sapa-gate` resumes with `sapa gate --after <name>` and reports the outcome
   with `--result`/`--summary`. `sapa gate --report` renders the walk's record as
@@ -261,6 +263,18 @@ inherit the session model. The recommended posture: run sessions on Opus and pin
 the review step to Fable, so the strongest model's judgment lands on the one step
 that is bounded, token-light, and needs no mid-task conversation.
 
+`when:` controls where a step runs in the gate's retry cycle. It accepts
+`always` (the default) or `pre-push`. Every gate attempt starts with the
+`always` steps. Once they are green, the walk continues through the `pre-push`
+steps without rerunning anything on the unchanged head. If a later finding
+changes the code, the next attempt starts from the first `always` step before
+returning to the pre-push checks. This resembles pre-commit and pre-push hook
+timing, but it belongs only to `/sapa-gate`; Sapa does not install Git hooks.
+
+Keep every `always` step before the first `pre-push` step. Sapa rejects the
+opposite order instead of silently rearranging the list. Existing configs omit
+`when`, so their steps remain always-run and retain the current behavior.
+
 The pin is a preference, not a requirement. When the harness cannot reach the
 pinned model — the running account has no access to it, or the harness has no such
 model, as Codex has no Fable — the step falls back to the session model and the
@@ -278,13 +292,14 @@ writing_style: humanizer
 gate:
   max_fix_attempts: 3
   steps:
-    - name: review
-      skill: code-review
-      model: fable
     - name: analyze
       run: fvm dart analyze
     - name: test
       run: fvm flutter test
+    - name: review
+      skill: code-review
+      model: fable
+      when: pre-push
 ```
 
 The gate is the only thing that checks the work, and nothing downstream
