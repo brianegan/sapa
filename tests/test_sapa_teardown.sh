@@ -51,6 +51,73 @@ if ! git -C "$proj/main" branch --list feature | grep -q feature; then ok "delet
 # The configured closer runs with the worktree's basename.
 if grep -qx "feature" "$recorded"; then ok "runs the configured closer"; else bad "runs the configured closer (recorded: $(cat "$recorded"))"; fi
 
+# --- a project teardown command runs before the worktree is removed ---
+hook_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/hooked" -b hooked
+printf 'teardown: test -d "$PWD" && pwd > "%s"\n' "$hook_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/hooked" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/hooked" ] && grep -qx "$proj/hooked" "$hook_record"; then
+  ok "runs the project teardown command before removal"
+else
+  bad "runs the project teardown command before removal (rc=$rc, out=$out, recorded: $(cat "$hook_record"))"
+fi
+
+# Shell operators in the config value work, and the personal closer still runs
+# after the project hook and worktree removal.
+order_record="$(mktemp)"
+ordering_closer="$(mktemp)"
+cat > "$ordering_closer" <<EOF
+#!/bin/bash
+if [ ! -d "$proj/ordered" ]; then
+  printf '%s\n' 'closer-after-removal' >> "$order_record"
+fi
+EOF
+chmod +x "$ordering_closer"
+git -C "$proj/main" worktree add -q "$proj/ordered" -b ordered
+printf 'teardown: test "$PWD" = "%s" && printf "%%s\\n" hook-before-removal >> "%s"\n' \
+  "$proj/ordered" "$order_record" > "$proj/.sapa.yaml"
+out="$(SAPA_TEARDOWN_CLOSER="$ordering_closer" bash "$TEARDOWN" "$proj/ordered" 2>&1)"; rc=$?
+expected_order="$(printf 'hook-before-removal\ncloser-after-removal')"
+if [ $rc -eq 0 ] && [ "$(cat "$order_record")" = "$expected_order" ]; then
+  ok "runs shell commands in the worktree before the personal closer"
+else
+  bad "runs shell commands in the worktree before the personal closer (rc=$rc, out=$out, order: $(cat "$order_record"))"
+fi
+rm -f "$order_record" "$ordering_closer"
+
+# --force bypasses the dirty guard but still runs project cleanup.
+force_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/hook-forced" -b hook-forced
+printf 'wip\n' > "$proj/hook-forced/scratch.txt"
+printf 'teardown: pwd > "%s"\n' "$force_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" --force "$proj/hook-forced" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/hook-forced" ] && grep -qx "$proj/hook-forced" "$force_record"; then
+  ok "force teardown still runs the project command"
+else
+  bad "force teardown still runs the project command (rc=$rc, out=$out, recorded: $(cat "$force_record"))"
+fi
+rm -f "$force_record"
+
+# A failed project command leaves the whole stream intact for diagnosis and
+# retry, including its status record, and never reaches the personal closer.
+git -C "$proj/main" worktree add -q "$proj/hook-failed" -b hook-failed
+printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
+hook_status_dir="$(mktemp -d)"
+SAPA_STATUS_DIR="$hook_status_dir" "$HERE/../bin/sapa-status" --stage watch --start "$proj/hook-failed"
+: > "$recorded"
+out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$proj/hook-failed" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && [ -d "$proj/hook-failed" ] \
+  && git -C "$proj/main" branch --list hook-failed | grep -q hook-failed \
+  && [ -e "$hook_status_dir/hook-failed.json" ] && [ ! -s "$recorded" ]; then
+  ok "a failed project teardown command preserves the whole stream"
+else
+  bad "a failed project teardown command preserves the whole stream (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml"
+bash "$TEARDOWN" "$proj/hook-failed" >/dev/null 2>&1
+rm -rf "$hook_status_dir"
+rm -f "$hook_record"
+
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
 printf 'wip\n' > "$proj/dirty/scratch.txt"

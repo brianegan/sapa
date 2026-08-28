@@ -132,6 +132,7 @@ me through my existing notification hook, which opens the right window on click.
 58. As a developer, I want sapa to stop edit-locking the plan comment, so that it always reflects the latest plan; I never hand-edit it, and dropping the lock is what makes the Jira rich-text path simple. My PR description stays edit-locked, since I do edit those.
 59. As a developer, I want the gate to write down what it actually ran, so that "the branch is green" is something I can check against a record rather than a claim that disappears with the session.
 60. As a reviewer, I want the PR to show which gate steps ran and whether any of them was given the plan to review against, so that I can see a thin gate for what it is without digging through someone else's config.
+61. As a developer, I want a project teardown command in `.sapa.yaml`, so that a repository can release its own resources before Sapa removes a finished worktree and preserve the stream when that cleanup fails.
 
 ## Implementation Decisions
 
@@ -380,6 +381,13 @@ me through my existing notification hook, which opens the right window on click.
   state of the stream. It removes the worktree and deletes the local branch so
   there is no manual cleanup. Two guards: it only tears down a clean worktree,
   and if there are uncommitted changes it skips teardown and flags them instead.
+  A project may set a top-level `teardown:` shell command in `.sapa.yaml`. Sapa
+  runs it from the target worktree after the clean-worktree guard but before it
+  clears status or removes anything. A non-zero exit stops teardown and keeps
+  the status, worktree, and local branch for diagnosis and retry; `--force`
+  bypasses only the clean-worktree guard. The project command runs for every
+  teardown invocation, while the personal editor closer remains best-effort
+  and runs only after successful removal.
   Because the watch session runs inside the very worktree it is removing, the
   teardown runs from the project root (not from inside the worktree) as the
   watcher's final action, after which the window is detached and can be closed.

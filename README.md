@@ -106,8 +106,10 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`). The `sapa-watch` skill runs it and reasons about each
   event.
-- `sapa teardown`: remove a merged stream's worktree and local branch, refusing
-  if there are uncommitted changes, then close its editor window.
+- `sapa teardown`: run the project's optional `teardown:` command, remove a
+  merged stream's worktree and local branch, and then close its editor window.
+  It refuses uncommitted changes unless forced, and a failed project command
+  stops removal.
 
 ### Skills
 
@@ -203,6 +205,12 @@ default:
 - `remote:`: the single remote to push to (default `origin`).
 - `pr:`: `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
+- `teardown:`: a shell command `sapa teardown` runs from the target worktree
+  after checking for uncommitted changes and before clearing its status or
+  removing anything. A non-zero exit stops teardown, leaving the worktree,
+  local branch, and status available for diagnosis and another attempt. The
+  command runs during every teardown, including `--force`; force bypasses only
+  the uncommitted-change guard.
 - `plan:`: a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grilling`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.

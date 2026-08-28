@@ -24,6 +24,13 @@
 # rather than a project key on purpose: which editor you run is yours, not
 # something a checked-in config should decide for the rest of the team.
 #
+# Project cleanup is separate. Set `teardown:` in the project's `.sapa.yaml` to
+# a shell command and teardown runs it from the worktree before removing
+# anything. A non-zero exit stops teardown so the worktree and branch remain
+# available for diagnosis and another attempt:
+#
+#   teardown: mise dev:teardown
+#
 # `SAPA_TEARDOWN_CLOSER` overrides the setting with a command of the same shape
 # (used by the tests, which must never drive a real editor).
 #
@@ -126,6 +133,31 @@ if ! $force && [ -n "$(git -C "$target" status --porcelain)" ]; then
   echo "sapa teardown: $target has uncommitted changes; not removing." >&2
   echo "Commit, stash, or rerun with -f/--force." >&2
   exit 3
+fi
+
+# Run the project's cleanup hook while its worktree and config still exist.
+# Resolve sapa-config beside this script first so a branch-local teardown uses
+# the matching branch-local config discovery behavior, then fall back to PATH.
+teardown_command=""
+sapa_config="$(dirname "$0")/sapa-config"
+if [ ! -x "$sapa_config" ]; then
+  sapa_config="$(command -v sapa-config || true)"
+fi
+if [ -n "$sapa_config" ]; then
+  teardown_command="$("$sapa_config" -p --start "$target" 2>/dev/null \
+                      | sed -nE 's/^teardown:[[:space:]]*(.+)$/\1/p' \
+                      | head -1 \
+                      | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+fi
+
+if [ -n "$teardown_command" ]; then
+  if (cd "$target" && /bin/bash -c "$teardown_command"); then
+    :
+  else
+    hook_rc=$?
+    echo "sapa teardown: project teardown command failed (exit $hook_rc); not removing $target." >&2
+    exit "$hook_rc"
+  fi
 fi
 
 # Clear this stream's window-switcher status file while the worktree (and its
