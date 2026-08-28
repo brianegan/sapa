@@ -69,40 +69,6 @@ run_closer() {
   esac
 }
 
-read_teardown_command() {
-  python3 - "$1" <<'PY'
-import sys
-
-path = sys.argv[1]
-try:
-    import yaml
-except ImportError:
-    print("sapa teardown: reading teardown: needs PyYAML, which is not importable by python3.", file=sys.stderr)
-    raise SystemExit(2)
-
-try:
-    with open(path, encoding="utf-8") as config_file:
-        config = yaml.safe_load(config_file)
-except (OSError, yaml.YAMLError) as error:
-    print(f"sapa teardown: could not read {path}: {error}", file=sys.stderr)
-    raise SystemExit(2)
-
-if config is None:
-    raise SystemExit(0)
-if not isinstance(config, dict):
-    print(f"sapa teardown: {path} must contain a YAML mapping.", file=sys.stderr)
-    raise SystemExit(2)
-if "teardown" not in config:
-    raise SystemExit(0)
-
-command = config["teardown"]
-if not isinstance(command, str):
-    print(f"sapa teardown: teardown: in {path} must be a string command.", file=sys.stderr)
-    raise SystemExit(2)
-sys.stdout.write(command)
-PY
-}
-
 force=false
 target=""
 while [ $# -gt 0 ]; do
@@ -180,7 +146,8 @@ fi
 if [ -n "$sapa_config" ]; then
   config_path="$("$sapa_config" --start "$target" 2>/dev/null || true)"
   if [ -n "$config_path" ]; then
-    if teardown_command="$(read_teardown_command "$config_path")"; then
+    config_reader="$(dirname "$0")/sapa_config.py"
+    if teardown_command="$(python3 "$config_reader" get-string "$config_path" teardown)"; then
       :
     else
       exit $?

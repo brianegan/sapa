@@ -49,13 +49,7 @@ import subprocess
 import sys
 import tempfile
 
-# pyyaml is the one third-party dependency. Imported guarded at the top the way
-# sapa-gate does, so a missing install becomes a friendly error via require_yaml
-# in whichever verb needs it, not a raw traceback from an inline import.
-try:
-    import yaml
-except ImportError:
-    yaml = None
+from sapa_config import ProjectConfigError, load_mapping, require_yaml as project_yaml
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
@@ -69,15 +63,11 @@ class SkillsError(Exception):
 
 
 def require_yaml():
-    """Return the pyyaml module, or raise a friendly SkillsError if it is absent.
-    Every verb that reads YAML routes through here so a missing install fails the
-    same way everywhere."""
-    if yaml is None:
-        raise SkillsError(
-            f"pyyaml is required but not importable by {sys.executable} "
-            f"(install it with: {sys.executable} -m pip install pyyaml)"
-        )
-    return yaml
+    """Adapt the shared project-config dependency error to this command."""
+    try:
+        return project_yaml()
+    except ProjectConfigError as error:
+        raise SkillsError(str(error)) from error
 
 
 def usage() -> None:
@@ -115,23 +105,11 @@ def find_config(start: str) -> str:
 
 
 def load_yaml(path: str) -> dict:
-    """Read the config as a plain dict with pyyaml — the read path, kept off the
-    write path so the offline verbs (enumerate, check) need only pyyaml."""
-    y = require_yaml()
+    """Adapt the shared project-config mapping to this command's error type."""
     try:
-        with open(path, encoding="utf-8") as f:
-            data = y.safe_load(f)
-    except OSError as e:
-        raise SkillsError(f"cannot read {path}: {e}")
-    except y.YAMLError as e:
-        raise SkillsError(f"{path} is not valid YAML: {e}")
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        # Match sapa-gate: a config that is not a mapping is an error, not an
-        # empty config coerced to a falsely-passing `check`.
-        raise SkillsError(f"{path} does not hold a mapping of settings")
-    return data
+        return load_mapping(path)
+    except ProjectConfigError as error:
+        raise SkillsError(str(error)) from error
 
 
 def skill_name(value) -> str:
