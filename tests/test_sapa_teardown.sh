@@ -149,6 +149,21 @@ bash "$TEARDOWN" "$proj/hook-failed" >/dev/null 2>&1
 rm -rf "$hook_status_dir"
 rm -f "$hook_record"
 
+# An existing project config without the opt-in key keeps teardown's previous
+# dependency contract: PyYAML is not needed unless a hook must be decoded.
+noyaml_dir="$(mktemp -d)"
+printf 'raise ImportError("no pyyaml here")\n' > "$noyaml_dir/yaml.py"
+git -C "$proj/main" worktree add -q "$proj/no-project-hook" -b no-project-hook
+printf 'base: main\n' > "$proj/.sapa.yaml"
+out="$(PYTHONPATH="$noyaml_dir" bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/no-project-hook" ]; then
+  ok "a config without teardown needs no PyYAML"
+else
+  bad "a config without teardown needs no PyYAML (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml"
+rm -rf "$noyaml_dir"
+
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
 printf 'wip\n' > "$proj/dirty/scratch.txt"
