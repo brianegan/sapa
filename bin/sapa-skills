@@ -49,13 +49,7 @@ import subprocess
 import sys
 import tempfile
 
-# pyyaml is the one third-party dependency. Imported guarded at the top the way
-# sapa-gate does, so a missing install becomes a friendly error via require_yaml
-# in whichever verb needs it, not a raw traceback from an inline import.
-try:
-    import yaml
-except ImportError:
-    yaml = None
+from sapa_config import ProjectConfigError, load_mapping, require_yaml
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
@@ -66,18 +60,6 @@ SKILL_KEYS = ("plan", "build", "writing_style")
 
 class SkillsError(Exception):
     """A user-facing failure: printed to stderr, turned into a non-zero exit."""
-
-
-def require_yaml():
-    """Return the pyyaml module, or raise a friendly SkillsError if it is absent.
-    Every verb that reads YAML routes through here so a missing install fails the
-    same way everywhere."""
-    if yaml is None:
-        raise SkillsError(
-            f"pyyaml is required but not importable by {sys.executable} "
-            f"(install it with: {sys.executable} -m pip install pyyaml)"
-        )
-    return yaml
 
 
 def usage() -> None:
@@ -112,26 +94,6 @@ def find_config(start: str) -> str:
     if r.returncode != 0:
         raise SkillsError((r.stderr or "no .sapa.yaml found").strip())
     return r.stdout.strip()
-
-
-def load_yaml(path: str) -> dict:
-    """Read the config as a plain dict with pyyaml — the read path, kept off the
-    write path so the offline verbs (enumerate, check) need only pyyaml."""
-    y = require_yaml()
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = y.safe_load(f)
-    except OSError as e:
-        raise SkillsError(f"cannot read {path}: {e}")
-    except y.YAMLError as e:
-        raise SkillsError(f"{path} is not valid YAML: {e}")
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        # Match sapa-gate: a config that is not a mapping is an error, not an
-        # empty config coerced to a falsely-passing `check`.
-        raise SkillsError(f"{path} does not hold a mapping of settings")
-    return data
 
 
 def skill_name(value) -> str:
@@ -178,7 +140,7 @@ def referenced(cfg: dict) -> list[tuple[str, object]]:
 
 def cmd_enumerate(rest: list[str]) -> int:
     start = parse_start(rest)
-    cfg = load_yaml(find_config(start))
+    cfg = load_mapping(find_config(start))
     for name, _value in referenced(cfg):
         print(name)
     return 0
@@ -215,7 +177,7 @@ def present_folders(sdir: str) -> set[str]:
 
 def cmd_check(rest: list[str]) -> int:
     start = parse_start(rest)
-    cfg = load_yaml(find_config(start))
+    cfg = load_mapping(find_config(start))
     sdir = skills_dir(start)
 
     want = provisioned_names(cfg)
@@ -352,7 +314,7 @@ def set_shas(text: str, want: dict) -> str:
 
 def compose_config(text: str, path: str):
     """Compose the config into a node tree (which carries line/column marks the
-    read-path dict lacks), applying the same friendly guards as load_yaml: a
+    read-path dict lacks), applying the same friendly guards as load_mapping: a
     YAML error and a non-mapping document both raise SkillsError rather than a
     raw traceback or a silent no-op, so lock and check agree on a bad config."""
     y = require_yaml()
@@ -470,7 +432,7 @@ def _object_skills(cfg: dict) -> list[dict]:
 
 def cmd_sync(rest: list[str]) -> int:
     start = parse_start(rest)
-    cfg = load_yaml(find_config(start))
+    cfg = load_mapping(find_config(start))
     dest_root = skills_dir(start)
 
     skills = _object_skills(cfg)
@@ -526,7 +488,7 @@ def main(argv: list[str]) -> int:
 
     try:
         return verbs[verb](rest)
-    except SkillsError as e:
+    except (SkillsError, ProjectConfigError) as e:
         print(f"sapa skills {verb}: {e}", file=sys.stderr)
         return 1
 

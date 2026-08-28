@@ -132,6 +132,7 @@ me through my existing notification hook, which opens the right window on click.
 58. As a developer, I want sapa to stop edit-locking the plan comment, so that it always reflects the latest plan; I never hand-edit it, and dropping the lock is what makes the Jira rich-text path simple. My PR description stays edit-locked, since I do edit those.
 59. As a developer, I want the gate to write down what it actually ran, so that "the branch is green" is something I can check against a record rather than a claim that disappears with the session.
 60. As a reviewer, I want the PR to show which gate steps ran and whether any of them was given the plan to review against, so that I can see a thin gate for what it is without digging through someone else's config.
+61. As a developer, I want a project teardown command in `.sapa.yaml`, so that a repository can release its own resources before Sapa removes a finished worktree and preserve the stream when that cleanup fails.
 
 ## Implementation Decisions
 
@@ -205,7 +206,8 @@ me through my existing notification hook, which opens the right window on click.
   Alongside the gate map, optional top-level keys tune the flow with
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
-  `draft`), `plan:` names a skill `/sapa-plan` delegates the planning
+  `draft`), `teardown:` is a project cleanup command that runs from the target
+  worktree before removal, `plan:` names a skill `/sapa-plan` delegates the planning
   discussion to, `build:` names a skill `/sapa-build` invokes once before its
   first task to shape the implementation (for example `/tdd`),
   `writing_style:` names a skill sapa runs as a final pass over
@@ -223,12 +225,11 @@ me through my existing notification hook, which opens the right window on click.
   read the keys they need the way they already read `base`. A few helpers read it
   themselves: `sapa start` greps the printed config for `tracker`/`project` to
   expand a bare number, `sapa worktree` greps it for `base`/`remote` to pick its
-  default start point, and `sapa gate` parses it with PyYAML. The gate is the
-  exception on purpose. Walking an ordered list of step maps is past what a grep
-  reads honestly, and unlike the other phases the gate's step execution is what
-  everything downstream trusts, so it earns a real parser and the tests that come
-  with it. That makes PyYAML a dependency of `sapa gate` alone; every other
-  command still runs on git and gh.
+  default start point, and `sapa gate` parses it with PyYAML. `sapa teardown`
+  also uses PyYAML when it finds a project config, so both the key and its shell
+  command follow YAML string semantics. Ordered gate step maps and teardown
+  command scalars are past what a grep reads honestly, so these paths use a real
+  parser and test the forms they accept.
 - **Changed-file contract for `run:` steps.** The gate rebases onto
   `<remote>/<base>` before it runs, so it already holds the diff against what will
   merge. It hands that to every `run:` step as `SAPA_BASE` and
@@ -380,6 +381,13 @@ me through my existing notification hook, which opens the right window on click.
   state of the stream. It removes the worktree and deletes the local branch so
   there is no manual cleanup. Two guards: it only tears down a clean worktree,
   and if there are uncommitted changes it skips teardown and flags them instead.
+  A project may set a top-level `teardown:` shell command in `.sapa.yaml`. Sapa
+  runs it from the target worktree after the clean-worktree guard but before it
+  clears status or removes anything. A non-zero exit stops teardown and keeps
+  the status, worktree, and local branch for diagnosis and retry; `--force`
+  bypasses only the clean-worktree guard. The project command runs for every
+  teardown invocation, while the personal editor closer remains best-effort
+  and runs only after successful removal.
   Because the watch session runs inside the very worktree it is removing, the
   teardown runs from the project root (not from inside the worktree) as the
   watcher's final action, after which the window is detached and can be closed.

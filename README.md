@@ -106,8 +106,10 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
   real change (`ci-failed`, `new-review`, `new-comment`, `base-behind`,
   `merged`, `closed`). The `sapa-watch` skill runs it and reasons about each
   event.
-- `sapa teardown`: remove a merged stream's worktree and local branch, refusing
-  if there are uncommitted changes, then close its editor window.
+- `sapa teardown`: run the project's optional `teardown:` command, remove a
+  merged stream's worktree and local branch, and then close its editor window.
+  It refuses uncommitted changes unless forced, and a failed project command
+  stops removal.
 
 ### Skills
 
@@ -131,8 +133,9 @@ Plus `.sapa.yaml` (Sapa's own gate config; it gates itself) and `tests/`.
 ## Install
 
 Needs `git`, `gh` (authenticated), `python3`, and PyYAML. PyYAML ships with
-Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise; only
-`sapa gate` needs it, to read the `gate:` map. Jira projects also need `acli`.
+Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Sapa
+uses it to read the `gate:` map and project `teardown:` commands. Jira projects
+also need `acli`.
 
 Clone the repo, then run the installer from it:
 
@@ -203,6 +206,12 @@ default:
 - `remote:`: the single remote to push to (default `origin`).
 - `pr:`: `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
+- `teardown:`: a shell command `sapa teardown` runs from the target worktree
+  after checking for uncommitted changes and before clearing its status or
+  removing anything. A non-zero exit stops teardown, leaving the worktree,
+  local branch, and status available for diagnosis and another attempt. The
+  command runs during every teardown, including `--force`; force bypasses only
+  the uncommitted-change guard.
 - `plan:`: a skill `/sapa-plan` invokes to run the planning discussion (for
   example wingspan `/plan` or `/grilling`). Omit it to use the built-in
   dialogue. Either way sapa still records the agreed plan to the issue.

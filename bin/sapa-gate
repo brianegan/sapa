@@ -170,10 +170,7 @@ import sys
 import termios
 import time
 
-try:
-    import yaml
-except ImportError:  # reported as a config error, with the fix, on first use
-    yaml = None
+from sapa_config import ProjectConfigError, load_mapping
 
 # Every structured line starts with this. `sapa watch` can lead with a bare event
 # type because nothing else writes to its stdout; the gate streams a test suite's
@@ -280,25 +277,6 @@ def worktree_root(start: str) -> str:
             f"the gate from the worktree you want checked; in a `.bare` layout that is "
             f"one of the branch directories, not the directory holding `.bare`")
     return root
-
-
-def load_config(path: str) -> dict:
-    if yaml is None:
-        raise ConfigError(
-            f"reading the gate config needs PyYAML, which is not importable by "
-            f"{sys.executable} (install it with: {sys.executable} -m pip install pyyaml)")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-    except OSError as exc:
-        raise ConfigError(f"could not read {path}: {exc}")
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"{path} is not valid YAML: {exc}")
-    if cfg is None:
-        cfg = {}
-    if not isinstance(cfg, dict):
-        raise ConfigError(f"{path} does not hold a mapping of settings")
-    return cfg
 
 
 def gate_map(cfg: dict, path: str) -> dict:
@@ -916,7 +894,7 @@ def gate(start: str, after: str | None, list_only: bool,
     # supplies the steps and the directory they run in cannot come apart.
     root = worktree_root(start)
     config_path = find_config(root)
-    cfg = load_config(config_path)
+    cfg = load_mapping(config_path)
     gate_cfg = gate_map(cfg, config_path)
     steps = resolve_steps(gate_cfg, config_path)
     # Validated here rather than where the bound is applied, so `--list` (the
@@ -1073,7 +1051,7 @@ def main() -> int:
             return report(os.path.abspath(args.start))
         return gate(os.path.abspath(args.start), args.after, args.list_only,
                     args.result, args.summary, args.fix_attempt, args.fell_back)
-    except ConfigError as exc:
+    except (ConfigError, ProjectConfigError) as exc:
         sys.stderr.write(f"sapa gate: {exc}\n")
         return EXIT_CONFIG
 

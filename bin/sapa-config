@@ -94,6 +94,10 @@ write_template() {
 # One of `ready` or `draft`. Default: draft.
 # pr: draft
 
+# A shell command `sapa teardown` runs from the worktree before removing it.
+# A non-zero exit stops teardown so the worktree and branch remain available.
+# teardown: mise dev:teardown
+
 # Issue backend. `github` (default) reads issues and records the plan on GitHub.
 # `jira` uses the Atlassian CLI (acli) and keeps PRs on GitHub.
 # tracker: github

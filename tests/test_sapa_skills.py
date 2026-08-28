@@ -490,7 +490,7 @@ def test_update_bumps_and_refreshes_uncommitted():
 
 def test_check_non_mapping_config_errors():
     # A config that is not a mapping is an error, not an empty config coerced to
-    # a falsely-passing check (matches sapa-gate's load_config).
+    # a falsely-passing check (matches the shared project config loader).
     with tempfile.TemporaryDirectory() as root:
         wt = make_worktree(root)
         write_config(wt, "- a\n- b\n")

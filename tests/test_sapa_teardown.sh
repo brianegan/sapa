@@ -13,6 +13,39 @@ pass=0; fail=0
 ok()   { echo "ok   $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL $1"; fail=$((fail+1)); }
 
+check_failed_project_hook() {
+  local name="$1" force_arg="$2" make_dirty="$3" label="$4"
+  local hook_status_dir out rc
+
+  hook_status_dir="$(mktemp -d)"
+  git -C "$proj/main" worktree add -q "$proj/$name" -b "$name"
+  if $make_dirty; then
+    printf 'wip\n' > "$proj/$name/scratch.txt"
+  fi
+  printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
+  SAPA_STATUS_DIR="$hook_status_dir" "$HERE/../bin/sapa-status" --stage watch --start "$proj/$name"
+  : > "$recorded"
+  if [ -n "$force_arg" ]; then
+    out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$force_arg" "$proj/$name" 2>&1)"; rc=$?
+  else
+    out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$proj/$name" 2>&1)"; rc=$?
+  fi
+  if [ $rc -ne 0 ] && [ -d "$proj/$name" ] \
+    && git -C "$proj/main" branch --list "$name" | grep -q "$name" \
+    && [ -e "$hook_status_dir/$name.json" ] && [ ! -s "$recorded" ]; then
+    ok "$label"
+  else
+    bad "$label (rc=$rc, out=$out)"
+  fi
+  rm -f "$proj/.sapa.yaml"
+  if $make_dirty; then
+    bash "$TEARDOWN" --force "$proj/$name" >/dev/null 2>&1
+  else
+    bash "$TEARDOWN" "$proj/$name" >/dev/null 2>&1
+  fi
+  rm -rf "$hook_status_dir"
+}
+
 # Build a bare-layout project: root/.bare + a main worktree + a feature worktree.
 root="$(mktemp -d)"
 
@@ -51,13 +84,112 @@ if ! git -C "$proj/main" branch --list feature | grep -q feature; then ok "delet
 # The configured closer runs with the worktree's basename.
 if grep -qx "feature" "$recorded"; then ok "runs the configured closer"; else bad "runs the configured closer (recorded: $(cat "$recorded"))"; fi
 
+# --- a project teardown command runs before the worktree is removed ---
+hook_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/hooked" -b hooked
+printf 'teardown: |\n  test -d "$PWD" && pwd > "%s"\n' "$hook_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/hooked" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/hooked" ] && grep -qx "$proj/hooked" "$hook_record"; then
+  ok "runs a block-scalar project command before removal"
+else
+  bad "runs a block-scalar project command before removal (rc=$rc, out=$out, recorded: $(cat "$hook_record"))"
+fi
+
+# YAML quoting and escapes are decoded before the command reaches the shell.
+yaml_escape_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/yaml-escaped" -b yaml-escaped
+printf 'teardown: "touch\\u0020%s"\n' "$yaml_escape_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/yaml-escaped" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/yaml-escaped" ] && [ -e "$yaml_escape_record" ]; then
+  ok "decodes a quoted YAML command before running it"
+else
+  bad "decodes a quoted YAML command before running it (rc=$rc, out=$out)"
+fi
+rm -f "$yaml_escape_record"
+
+# Shell operators in the config value work, and the personal closer still runs
+# after the project hook and worktree removal.
+order_record="$(mktemp)"
+ordering_closer="$(mktemp)"
+cat > "$ordering_closer" <<EOF
+#!/bin/bash
+if [ ! -d "$proj/ordered" ]; then
+  printf '%s\n' 'closer-after-removal' >> "$order_record"
+fi
+EOF
+chmod +x "$ordering_closer"
+git -C "$proj/main" worktree add -q "$proj/ordered" -b ordered
+printf 'teardown: test "$PWD" = "%s" && printf "%%s\\n" hook-before-removal >> "%s"\n' \
+  "$proj/ordered" "$order_record" > "$proj/.sapa.yaml"
+out="$(SAPA_TEARDOWN_CLOSER="$ordering_closer" bash "$TEARDOWN" "$proj/ordered" 2>&1)"; rc=$?
+expected_order="$(printf 'hook-before-removal\ncloser-after-removal')"
+if [ $rc -eq 0 ] && [ "$(cat "$order_record")" = "$expected_order" ]; then
+  ok "runs shell commands in the worktree before the personal closer"
+else
+  bad "runs shell commands in the worktree before the personal closer (rc=$rc, out=$out, order: $(cat "$order_record"))"
+fi
+rm -f "$order_record" "$ordering_closer"
+
+# --force bypasses the dirty guard but still runs project cleanup.
+force_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/hook-forced" -b hook-forced
+printf 'wip\n' > "$proj/hook-forced/scratch.txt"
+printf 'teardown: pwd > "%s"\n' "$force_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" --force "$proj/hook-forced" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/hook-forced" ] && grep -qx "$proj/hook-forced" "$force_record"; then
+  ok "force teardown still runs the project command"
+else
+  bad "force teardown still runs the project command (rc=$rc, out=$out, recorded: $(cat "$force_record"))"
+fi
+rm -f "$force_record"
+
+check_failed_project_hook \
+  hook-force-failed --force true \
+  "force does not override a failed project command"
+check_failed_project_hook \
+  hook-failed "" false \
+  "a failed project teardown command preserves the whole stream"
+rm -f "$hook_record"
+
+# With Sapa's documented dependencies installed, an existing project config
+# without the opt-in key remains a behavioral no-op.
+git -C "$proj/main" worktree add -q "$proj/no-project-hook" -b no-project-hook
+printf 'base: main\n' > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/no-project-hook" ]; then
+  ok "a config without teardown changes nothing"
+else
+  bad "a config without teardown changes nothing (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml"
+
+# YAML key spelling is decoded by the same parser as the command value.
+quoted_key_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/quoted-hook-key" -b quoted-hook-key
+printf '"teardown": touch "%s"\n' "$quoted_key_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/quoted-hook-key" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/quoted-hook-key" ] && [ -e "$quoted_key_record" ]; then
+  ok "decodes a quoted YAML teardown key"
+else
+  bad "decodes a quoted YAML teardown key (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml" "$quoted_key_record"
+
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
 printf 'wip\n' > "$proj/dirty/scratch.txt"
+dirty_hook_record="$(mktemp)"
+printf 'teardown: touch "%s"\n' "$dirty_hook_record" > "$proj/.sapa.yaml"
+rm -f "$dirty_hook_record"
 out="$(bash "$TEARDOWN" "$proj/dirty" 2>&1)"; rc=$?
-if [ $rc -eq 3 ] && [ -d "$proj/dirty" ]; then ok "refuses dirty worktree"; else bad "refuses dirty worktree (rc=$rc, $out)"; fi
+if [ $rc -eq 3 ] && [ -d "$proj/dirty" ] && [ ! -e "$dirty_hook_record" ]; then
+  ok "refuses dirty worktree before running the project command"
+else
+  bad "refuses dirty worktree before running the project command (rc=$rc, $out)"
+fi
 # The refusal names both spellings of the escape hatch.
 if grep -q -- "-f/--force" <<<"$out"; then ok "refusal hint names -f and --force"; else bad "refusal hint names -f and --force ($out)"; fi
+rm -f "$proj/.sapa.yaml" "$dirty_hook_record"
 
 # --- --force removes a dirty worktree ---
 out="$(bash "$TEARDOWN" --force "$proj/dirty" 2>&1)"; rc=$?
