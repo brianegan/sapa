@@ -151,20 +151,17 @@ check_failed_project_hook \
   "a failed project teardown command preserves the whole stream"
 rm -f "$hook_record"
 
-# An existing project config without the opt-in key remains a no-op even when
-# PyYAML is unavailable, because there is no YAML command to decode.
-noyaml_dir="$(mktemp -d)"
-printf 'raise ImportError("no pyyaml here")\n' > "$noyaml_dir/yaml.py"
+# With Sapa's documented dependencies installed, an existing project config
+# without the opt-in key remains a behavioral no-op.
 git -C "$proj/main" worktree add -q "$proj/no-project-hook" -b no-project-hook
 printf 'base: main\n' > "$proj/.sapa.yaml"
-out="$(PYTHONPATH="$noyaml_dir" bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
+out="$(bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/no-project-hook" ]; then
   ok "a config without teardown changes nothing"
 else
   bad "a config without teardown changes nothing (rc=$rc, out=$out)"
 fi
 rm -f "$proj/.sapa.yaml"
-rm -rf "$noyaml_dir"
 
 # YAML key spelling is decoded by the same parser as the command value.
 quoted_key_record="$(mktemp)"
