@@ -13,6 +13,39 @@ pass=0; fail=0
 ok()   { echo "ok   $1"; pass=$((pass+1)); }
 bad()  { echo "FAIL $1"; fail=$((fail+1)); }
 
+check_failed_project_hook() {
+  local name="$1" force_arg="$2" make_dirty="$3" label="$4"
+  local hook_status_dir out rc
+
+  hook_status_dir="$(mktemp -d)"
+  git -C "$proj/main" worktree add -q "$proj/$name" -b "$name"
+  if $make_dirty; then
+    printf 'wip\n' > "$proj/$name/scratch.txt"
+  fi
+  printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
+  SAPA_STATUS_DIR="$hook_status_dir" "$HERE/../bin/sapa-status" --stage watch --start "$proj/$name"
+  : > "$recorded"
+  if [ -n "$force_arg" ]; then
+    out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$force_arg" "$proj/$name" 2>&1)"; rc=$?
+  else
+    out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$proj/$name" 2>&1)"; rc=$?
+  fi
+  if [ $rc -ne 0 ] && [ -d "$proj/$name" ] \
+    && git -C "$proj/main" branch --list "$name" | grep -q "$name" \
+    && [ -e "$hook_status_dir/$name.json" ] && [ ! -s "$recorded" ]; then
+    ok "$label"
+  else
+    bad "$label (rc=$rc, out=$out)"
+  fi
+  rm -f "$proj/.sapa.yaml"
+  if $make_dirty; then
+    bash "$TEARDOWN" --force "$proj/$name" >/dev/null 2>&1
+  else
+    bash "$TEARDOWN" "$proj/$name" >/dev/null 2>&1
+  fi
+  rm -rf "$hook_status_dir"
+}
+
 # Build a bare-layout project: root/.bare + a main worktree + a feature worktree.
 root="$(mktemp -d)"
 
@@ -110,55 +143,28 @@ else
 fi
 rm -f "$force_record"
 
-# --force cannot override a project cleanup failure.
-forced_failure_status="$(mktemp -d)"
-git -C "$proj/main" worktree add -q "$proj/hook-force-failed" -b hook-force-failed
-printf 'wip\n' > "$proj/hook-force-failed/scratch.txt"
-printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
-SAPA_STATUS_DIR="$forced_failure_status" "$HERE/../bin/sapa-status" --stage watch --start "$proj/hook-force-failed"
-: > "$recorded"
-out="$(SAPA_STATUS_DIR="$forced_failure_status" bash "$TEARDOWN" --force "$proj/hook-force-failed" 2>&1)"; rc=$?
-if [ $rc -ne 0 ] && [ -d "$proj/hook-force-failed" ] \
-  && git -C "$proj/main" branch --list hook-force-failed | grep -q hook-force-failed \
-  && [ -e "$forced_failure_status/hook-force-failed.json" ] && [ ! -s "$recorded" ]; then
-  ok "force does not override a failed project command"
-else
-  bad "force does not override a failed project command (rc=$rc, out=$out)"
-fi
-rm -f "$proj/.sapa.yaml"
-bash "$TEARDOWN" --force "$proj/hook-force-failed" >/dev/null 2>&1
-rm -rf "$forced_failure_status"
-
-# A failed project command leaves the whole stream intact for diagnosis and
-# retry, including its status record, and never reaches the personal closer.
-git -C "$proj/main" worktree add -q "$proj/hook-failed" -b hook-failed
-printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
-hook_status_dir="$(mktemp -d)"
-SAPA_STATUS_DIR="$hook_status_dir" "$HERE/../bin/sapa-status" --stage watch --start "$proj/hook-failed"
-: > "$recorded"
-out="$(SAPA_STATUS_DIR="$hook_status_dir" bash "$TEARDOWN" "$proj/hook-failed" 2>&1)"; rc=$?
-if [ $rc -ne 0 ] && [ -d "$proj/hook-failed" ] \
-  && git -C "$proj/main" branch --list hook-failed | grep -q hook-failed \
-  && [ -e "$hook_status_dir/hook-failed.json" ] && [ ! -s "$recorded" ]; then
-  ok "a failed project teardown command preserves the whole stream"
-else
-  bad "a failed project teardown command preserves the whole stream (rc=$rc, out=$out)"
-fi
-rm -f "$proj/.sapa.yaml"
-bash "$TEARDOWN" "$proj/hook-failed" >/dev/null 2>&1
-rm -rf "$hook_status_dir"
+check_failed_project_hook \
+  hook-force-failed --force true \
+  "force does not override a failed project command"
+check_failed_project_hook \
+  hook-failed "" false \
+  "a failed project teardown command preserves the whole stream"
 rm -f "$hook_record"
 
-# An existing project config without the opt-in key remains a no-op.
+# An existing project config without the opt-in key remains a no-op even when
+# PyYAML is unavailable, because there is no YAML command to decode.
+noyaml_dir="$(mktemp -d)"
+printf 'raise ImportError("no pyyaml here")\n' > "$noyaml_dir/yaml.py"
 git -C "$proj/main" worktree add -q "$proj/no-project-hook" -b no-project-hook
 printf 'base: main\n' > "$proj/.sapa.yaml"
-out="$(bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
+out="$(PYTHONPATH="$noyaml_dir" bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/no-project-hook" ]; then
   ok "a config without teardown changes nothing"
 else
   bad "a config without teardown changes nothing (rc=$rc, out=$out)"
 fi
 rm -f "$proj/.sapa.yaml"
+rm -rf "$noyaml_dir"
 
 # YAML key spelling is decoded by the same parser as the command value.
 quoted_key_record="$(mktemp)"

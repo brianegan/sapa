@@ -71,15 +71,29 @@ run_closer() {
 
 read_teardown_command() {
   python3 - "$1" <<'PY'
+import re
 import sys
 
+path = sys.argv[1]
 try:
     import yaml
 except ImportError:
+    try:
+        with open(path, encoding="utf-8") as config_file:
+            raw_config = config_file.read()
+    except OSError as error:
+        print(f"sapa teardown: could not read {path}: {error}", file=sys.stderr)
+        raise SystemExit(2)
+
+    possible_key = re.search(
+        r"(?m)(?:^|[,{])\s*(?:teardown|['\"]teardown['\"])\s*:",
+        raw_config,
+    )
+    if possible_key is None:
+        raise SystemExit(0)
     print("sapa teardown: reading teardown: needs PyYAML, which is not importable by python3.", file=sys.stderr)
     raise SystemExit(2)
 
-path = sys.argv[1]
 try:
     with open(path, encoding="utf-8") as config_file:
         config = yaml.safe_load(config_file)
