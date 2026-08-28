@@ -279,13 +279,6 @@ def worktree_root(start: str) -> str:
     return root
 
 
-def load_config(path: str) -> dict:
-    try:
-        return load_mapping(path)
-    except ProjectConfigError as exc:
-        raise ConfigError(str(exc)) from exc
-
-
 def gate_map(cfg: dict, path: str) -> dict:
     """The `gate:` mapping. Raises ConfigError when the key is missing or not a map.
 
@@ -901,7 +894,7 @@ def gate(start: str, after: str | None, list_only: bool,
     # supplies the steps and the directory they run in cannot come apart.
     root = worktree_root(start)
     config_path = find_config(root)
-    cfg = load_config(config_path)
+    cfg = load_mapping(config_path)
     gate_cfg = gate_map(cfg, config_path)
     steps = resolve_steps(gate_cfg, config_path)
     # Validated here rather than where the bound is applied, so `--list` (the
@@ -1058,7 +1051,7 @@ def main() -> int:
             return report(os.path.abspath(args.start))
         return gate(os.path.abspath(args.start), args.after, args.list_only,
                     args.result, args.summary, args.fix_attempt, args.fell_back)
-    except ConfigError as exc:
+    except (ConfigError, ProjectConfigError) as exc:
         sys.stderr.write(f"sapa gate: {exc}\n")
         return EXIT_CONFIG
 

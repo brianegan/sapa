@@ -147,7 +147,7 @@ if [ -n "$sapa_config" ]; then
   config_path="$("$sapa_config" --start "$target" 2>/dev/null || true)"
   if [ -n "$config_path" ]; then
     config_reader="$(dirname "$0")/sapa_config.py"
-    if teardown_command="$(python3 "$config_reader" get-string "$config_path" teardown)"; then
+    if teardown_command="$(python3 "$config_reader" "$config_path")"; then
       :
     else
       exit $?

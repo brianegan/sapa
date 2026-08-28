@@ -43,23 +43,23 @@ def load_mapping(path: str) -> dict:
     return config
 
 
-def string_value(path: str, key: str) -> str | None:
-    """Return an optional string setting, rejecting present non-string values."""
+def teardown_command(path: str) -> str | None:
+    """Return the optional project teardown command."""
     config = load_mapping(path)
-    if key not in config:
+    if "teardown" not in config:
         return None
-    value = config[key]
+    value = config["teardown"]
     if not isinstance(value, str):
-        raise ProjectConfigError(f"{key}: in {path} must be a string")
+        raise ProjectConfigError(f"`teardown:` in {path} must be a string")
     return value
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 4 or argv[1] != "get-string":
-        print(f"usage: {argv[0]} get-string CONFIG KEY", file=sys.stderr)
+    if len(argv) != 2:
+        print(f"usage: {argv[0]} CONFIG", file=sys.stderr)
         return 2
     try:
-        value = string_value(argv[2], argv[3])
+        value = teardown_command(argv[1])
     except ProjectConfigError as error:
         print(f"sapa config: {error}", file=sys.stderr)
         return 2
