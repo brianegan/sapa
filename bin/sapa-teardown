@@ -69,6 +69,40 @@ run_closer() {
   esac
 }
 
+read_teardown_command() {
+  python3 - "$1" <<'PY'
+import sys
+
+try:
+    import yaml
+except ImportError:
+    print("sapa teardown: reading teardown: needs PyYAML, which is not importable by python3.", file=sys.stderr)
+    raise SystemExit(2)
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file)
+except (OSError, yaml.YAMLError) as error:
+    print(f"sapa teardown: could not read {path}: {error}", file=sys.stderr)
+    raise SystemExit(2)
+
+if config is None:
+    raise SystemExit(0)
+if not isinstance(config, dict):
+    print(f"sapa teardown: {path} must contain a YAML mapping.", file=sys.stderr)
+    raise SystemExit(2)
+if "teardown" not in config:
+    raise SystemExit(0)
+
+command = config["teardown"]
+if not isinstance(command, str):
+    print(f"sapa teardown: teardown: in {path} must be a string command.", file=sys.stderr)
+    raise SystemExit(2)
+sys.stdout.write(command)
+PY
+}
+
 force=false
 target=""
 while [ $# -gt 0 ]; do
@@ -144,14 +178,18 @@ if [ ! -x "$sapa_config" ]; then
   sapa_config="$(command -v sapa-config || true)"
 fi
 if [ -n "$sapa_config" ]; then
-  teardown_command="$("$sapa_config" -p --start "$target" 2>/dev/null \
-                      | sed -nE 's/^teardown:[[:space:]]*(.+)$/\1/p' \
-                      | head -1 \
-                      | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+  config_path="$("$sapa_config" --start "$target" 2>/dev/null || true)"
+  if [ -n "$config_path" ]; then
+    if teardown_command="$(read_teardown_command "$config_path")"; then
+      :
+    else
+      exit $?
+    fi
+  fi
 fi
 
 if [ -n "$teardown_command" ]; then
-  if (cd "$target" && /bin/bash -c "$teardown_command"); then
+  if (cd "$target" && /bin/sh -c "$teardown_command"); then
     :
   else
     hook_rc=$?

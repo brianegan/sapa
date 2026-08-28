@@ -54,13 +54,25 @@ if grep -qx "feature" "$recorded"; then ok "runs the configured closer"; else ba
 # --- a project teardown command runs before the worktree is removed ---
 hook_record="$(mktemp)"
 git -C "$proj/main" worktree add -q "$proj/hooked" -b hooked
-printf 'teardown: test -d "$PWD" && pwd > "%s"\n' "$hook_record" > "$proj/.sapa.yaml"
+printf 'teardown: |\n  test -d "$PWD" && pwd > "%s"\n' "$hook_record" > "$proj/.sapa.yaml"
 out="$(bash "$TEARDOWN" "$proj/hooked" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/hooked" ] && grep -qx "$proj/hooked" "$hook_record"; then
-  ok "runs the project teardown command before removal"
+  ok "runs a block-scalar project command before removal"
 else
-  bad "runs the project teardown command before removal (rc=$rc, out=$out, recorded: $(cat "$hook_record"))"
+  bad "runs a block-scalar project command before removal (rc=$rc, out=$out, recorded: $(cat "$hook_record"))"
 fi
+
+# YAML quoting and escapes are decoded before the command reaches the shell.
+yaml_escape_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/yaml-escaped" -b yaml-escaped
+printf 'teardown: "touch\\u0020%s"\n' "$yaml_escape_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/yaml-escaped" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/yaml-escaped" ] && [ -e "$yaml_escape_record" ]; then
+  ok "decodes a quoted YAML command before running it"
+else
+  bad "decodes a quoted YAML command before running it (rc=$rc, out=$out)"
+fi
+rm -f "$yaml_escape_record"
 
 # Shell operators in the config value work, and the personal closer still runs
 # after the project hook and worktree removal.
@@ -98,6 +110,25 @@ else
 fi
 rm -f "$force_record"
 
+# --force cannot override a project cleanup failure.
+forced_failure_status="$(mktemp -d)"
+git -C "$proj/main" worktree add -q "$proj/hook-force-failed" -b hook-force-failed
+printf 'wip\n' > "$proj/hook-force-failed/scratch.txt"
+printf 'teardown: /bin/false\n' > "$proj/.sapa.yaml"
+SAPA_STATUS_DIR="$forced_failure_status" "$HERE/../bin/sapa-status" --stage watch --start "$proj/hook-force-failed"
+: > "$recorded"
+out="$(SAPA_STATUS_DIR="$forced_failure_status" bash "$TEARDOWN" --force "$proj/hook-force-failed" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && [ -d "$proj/hook-force-failed" ] \
+  && git -C "$proj/main" branch --list hook-force-failed | grep -q hook-force-failed \
+  && [ -e "$forced_failure_status/hook-force-failed.json" ] && [ ! -s "$recorded" ]; then
+  ok "force does not override a failed project command"
+else
+  bad "force does not override a failed project command (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml"
+bash "$TEARDOWN" --force "$proj/hook-force-failed" >/dev/null 2>&1
+rm -rf "$forced_failure_status"
+
 # A failed project command leaves the whole stream intact for diagnosis and
 # retry, including its status record, and never reaches the personal closer.
 git -C "$proj/main" worktree add -q "$proj/hook-failed" -b hook-failed
@@ -121,10 +152,18 @@ rm -f "$hook_record"
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty
 printf 'wip\n' > "$proj/dirty/scratch.txt"
+dirty_hook_record="$(mktemp)"
+printf 'teardown: touch "%s"\n' "$dirty_hook_record" > "$proj/.sapa.yaml"
+rm -f "$dirty_hook_record"
 out="$(bash "$TEARDOWN" "$proj/dirty" 2>&1)"; rc=$?
-if [ $rc -eq 3 ] && [ -d "$proj/dirty" ]; then ok "refuses dirty worktree"; else bad "refuses dirty worktree (rc=$rc, $out)"; fi
+if [ $rc -eq 3 ] && [ -d "$proj/dirty" ] && [ ! -e "$dirty_hook_record" ]; then
+  ok "refuses dirty worktree before running the project command"
+else
+  bad "refuses dirty worktree before running the project command (rc=$rc, $out)"
+fi
 # The refusal names both spellings of the escape hatch.
 if grep -q -- "-f/--force" <<<"$out"; then ok "refusal hint names -f and --force"; else bad "refusal hint names -f and --force ($out)"; fi
+rm -f "$proj/.sapa.yaml" "$dirty_hook_record"
 
 # --- --force removes a dirty worktree ---
 out="$(bash "$TEARDOWN" --force "$proj/dirty" 2>&1)"; rc=$?
