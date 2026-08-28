@@ -206,7 +206,8 @@ me through my existing notification hook, which opens the right window on click.
   Alongside the gate map, optional top-level keys tune the flow with
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
-  `draft`), `plan:` names a skill `/sapa-plan` delegates the planning
+  `draft`), `teardown:` is a project cleanup command that runs from the target
+  worktree before removal, `plan:` names a skill `/sapa-plan` delegates the planning
   discussion to, `build:` names a skill `/sapa-build` invokes once before its
   first task to shape the implementation (for example `/tdd`),
   `writing_style:` names a skill sapa runs as a final pass over
@@ -224,12 +225,11 @@ me through my existing notification hook, which opens the right window on click.
   read the keys they need the way they already read `base`. A few helpers read it
   themselves: `sapa start` greps the printed config for `tracker`/`project` to
   expand a bare number, `sapa worktree` greps it for `base`/`remote` to pick its
-  default start point, and `sapa gate` parses it with PyYAML. The gate is the
-  exception on purpose. Walking an ordered list of step maps is past what a grep
-  reads honestly, and unlike the other phases the gate's step execution is what
-  everything downstream trusts, so it earns a real parser and the tests that come
-  with it. That makes PyYAML a dependency of `sapa gate` alone; every other
-  command still runs on git and gh.
+  default start point, and `sapa gate` parses it with PyYAML. `sapa teardown`
+  also uses PyYAML when it finds a project config, so both the key and its shell
+  command follow YAML string semantics. Ordered gate step maps and teardown
+  command scalars are past what a grep reads honestly, so these paths use a real
+  parser and test the forms they accept.
 - **Changed-file contract for `run:` steps.** The gate rebases onto
   `<remote>/<base>` before it runs, so it already holds the diff against what will
   merge. It hands that to every `run:` step as `SAPA_BASE` and

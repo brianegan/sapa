@@ -179,10 +179,7 @@ if [ ! -x "$sapa_config" ]; then
 fi
 if [ -n "$sapa_config" ]; then
   config_path="$("$sapa_config" --start "$target" 2>/dev/null || true)"
-  # Keep teardown's old dependency contract when the opt-in key is absent.
-  # Parsing is needed for the command's YAML scalar forms, but ordinary project
-  # configs should not start requiring PyYAML merely because this hook exists.
-  if [ -n "$config_path" ] && grep -qE '^teardown[[:space:]]*:' "$config_path"; then
+  if [ -n "$config_path" ]; then
     if teardown_command="$(read_teardown_command "$config_path")"; then
       :
     else

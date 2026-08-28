@@ -149,20 +149,28 @@ bash "$TEARDOWN" "$proj/hook-failed" >/dev/null 2>&1
 rm -rf "$hook_status_dir"
 rm -f "$hook_record"
 
-# An existing project config without the opt-in key keeps teardown's previous
-# dependency contract: PyYAML is not needed unless a hook must be decoded.
-noyaml_dir="$(mktemp -d)"
-printf 'raise ImportError("no pyyaml here")\n' > "$noyaml_dir/yaml.py"
+# An existing project config without the opt-in key remains a no-op.
 git -C "$proj/main" worktree add -q "$proj/no-project-hook" -b no-project-hook
 printf 'base: main\n' > "$proj/.sapa.yaml"
-out="$(PYTHONPATH="$noyaml_dir" bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
+out="$(bash "$TEARDOWN" "$proj/no-project-hook" 2>&1)"; rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$proj/no-project-hook" ]; then
-  ok "a config without teardown needs no PyYAML"
+  ok "a config without teardown changes nothing"
 else
-  bad "a config without teardown needs no PyYAML (rc=$rc, out=$out)"
+  bad "a config without teardown changes nothing (rc=$rc, out=$out)"
 fi
 rm -f "$proj/.sapa.yaml"
-rm -rf "$noyaml_dir"
+
+# YAML key spelling is decoded by the same parser as the command value.
+quoted_key_record="$(mktemp)"
+git -C "$proj/main" worktree add -q "$proj/quoted-hook-key" -b quoted-hook-key
+printf '"teardown": touch "%s"\n' "$quoted_key_record" > "$proj/.sapa.yaml"
+out="$(bash "$TEARDOWN" "$proj/quoted-hook-key" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$proj/quoted-hook-key" ] && [ -e "$quoted_key_record" ]; then
+  ok "decodes a quoted YAML teardown key"
+else
+  bad "decodes a quoted YAML teardown key (rc=$rc, out=$out)"
+fi
+rm -f "$proj/.sapa.yaml" "$quoted_key_record"
 
 # --- dirty worktree is refused ---
 git -C "$proj/main" worktree add -q "$proj/dirty" -b dirty

@@ -133,8 +133,9 @@ Plus `.sapa.yaml` (Sapa's own gate config; it gates itself) and `tests/`.
 ## Install
 
 Needs `git`, `gh` (authenticated), `python3`, and PyYAML. PyYAML ships with
-Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise; only
-`sapa gate` needs it, to read the `gate:` map. Jira projects also need `acli`.
+Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Sapa
+uses it to read the `gate:` map and project `teardown:` commands. Jira projects
+also need `acli`.
 
 Clone the repo, then run the installer from it:
 
