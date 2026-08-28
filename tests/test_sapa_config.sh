@@ -141,6 +141,9 @@ check "init documents max_fix_attempts" "yes" "$budget"
 model=no
 grep -qE "^#       model: .*#.*session model" "$fresh/.sapa.yaml" && model=yes
 check "init documents a skill step's model:" "yes" "$model"
+when=no
+grep -qE "^#       when: pre-push .*always.*default" "$fresh/.sapa.yaml" && when=yes
+check "init documents gate step when:" "yes" "$when"
 
 # Task 3: a non-interactive run refuses when a config exists (proj/ has one).
 guarded="$root/proj/feature/init-here"

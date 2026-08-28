@@ -126,18 +126,20 @@ write_template() {
 #   max_ci_fix_attempts: 3
 
 # The quality gate `sapa gate` runs. `steps:` is a list run in order; a step
-# either invokes a skill or runs a shell command. Replace this example with your
-# project's own checks.
+# either invokes a skill or runs a shell command. Steps default to `when: always`;
+# use `when: pre-push` only after all always-run steps. This schedules the gate
+# walk and does not install Git hooks. Replace this example with your own checks.
 # gate:
 #   # How many fixes `/sapa-gate` applies and re-runs for one failing gate before
 #   # it stops and hands the stream back. 0 never autofixes. Default: 3.
 #   max_fix_attempts: 3
 #   steps:
+#     - name: test
+#       run: npm test
 #     - name: review
 #       skill: code-review
 #       model: fable  # optional; only for skill: steps, pins to fable, opus, sonnet, or haiku. Defaults to the session model.
-#     - name: test
-#       run: npm test
+#       when: pre-push  # optional; `always` (default) or `pre-push`.
 YAML
 }
 

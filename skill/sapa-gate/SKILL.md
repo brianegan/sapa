@@ -27,7 +27,7 @@ the `gate:` map, which holds the ordered `steps:` list and the autofix budget
 `max_fix_attempts:` (default 3, covered in Step 3). `sapa config -p` shows the
 whole file if you want the other keys too.
 
-Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
+Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>  <when>`:
 
 - a `run:` step is a shell command the helper runs verbatim. It may carry a
   version-manager prefix such as `fvm flutter test`.
@@ -37,6 +37,9 @@ Each line is `sapa-gate  list  <name>  run|skill  <command-or-skill>  <model>`:
   override accepts (`fable`, `opus`, `sonnet`, `haiku`). It is meaningful for
   `skill:` steps; Step 3 says how to honour it. Absent, the step runs on the
   session model.
+- `when:` is `always` (the default) or `pre-push`. Every `always` step must come
+  before the first `pre-push` step. Pre-push is a point in this gate walk, not a
+  Git hook.
 
 Exit 2 means nothing ran, and the message says which of two causes it was.
 
@@ -91,7 +94,10 @@ gate` computes it and hands it to each `run:` step, so a script can scope to it.
 
 Run `sapa gate`. It walks the configured steps in order in the working tree,
 runs each `run:` step with `SAPA_BASE` and `SAPA_CHANGED_FILES` set from the diff
-the rebase just settled, and stops the moment something needs you. This blocks.
+the rebase just settled, and stops the moment something needs you. Always-run
+steps come first on every attempt. Once they pass, the helper continues through
+the pre-push steps on the same head without rerunning the earlier group. This
+blocks.
 
 It emits one tab-separated line per result, each led by `sapa-gate` so a step's
 own output can't be mistaken for one:
@@ -106,12 +112,13 @@ sapa-gate	done	green
 ```
 
 As it walks, `sapa gate` writes a record of what ran to the stream's scratch
-directory — per step the name, kind, command or skill, model, result, duration,
-and a tail of its output, plus the SHAs the run gated and whether any step was
-given the plan as a spec source. `/sapa-submit` publishes a summary of it to the
-PR through `sapa gate --report`, so what you report in chat and what a reviewer
-sees come from the same place. Nothing here has to maintain the record by hand;
-the one thing it needs from you is the outcome of each `skill:` step, below.
+directory — per step the name, kind, command or skill, model, schedule, result,
+duration, and a tail of its output, plus the SHAs the run gated and whether any
+step was given the plan as a spec source. `/sapa-submit` publishes a summary of
+it to the PR through `sapa gate --report`, so what you report in chat and what a
+reviewer sees come from the same place. Nothing here has to maintain the record
+by hand; the one thing it needs from you is the outcome of each `skill:` step,
+below.
 
 Act on the exit code:
 
@@ -174,9 +181,11 @@ not the single instance in front of you.
 
 "Fix it and run the gate again" with no stop is a loop that grinds. Repeated
 failed fixes usually mean the failure is deeper than the patch, and the gate is
-the worst place to keep guessing, because it is foreground and blocking: every
-pass pays the whole gate, including a pinned `skill:` review step, while the
-developer waits. So the loop is bounded, the way `sapa-watch`'s CI loop is.
+the worst place to keep guessing because it is foreground and blocking. Every
+attempt pays for the always-run steps; pre-push steps run only after those pass.
+A fix to a pre-push finding changes the head, so the next attempt starts from the
+first always-run step before checking pre-push again. The loop is bounded, the
+way `sapa-watch`'s CI loop is.
 
 Every failed run ends with `sapa-gate	attempts	<spent>	<max>`. `<max>` is
 `gate.max_fix_attempts` (default 3). **When `<spent>` has reached `<max>`, stop
