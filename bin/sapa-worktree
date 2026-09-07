@@ -4,8 +4,9 @@
 # Walks up from the current directory to the project root (the parent of the
 # `.bare` directory that sapa bootstrap creates), fetches the configured remote
 # (see `.sapa.yaml` `remote:`, default origin), adds a worktree for the given
-# branch off `<remote>/<base>` (see `.sapa.yaml` `base:`, default main), runs an
-# optional per-project setup hook, and opens the tree in your editor.
+# branch off `<remote>/<base>` (see `.sapa.yaml` `base:`, default main), runs the
+# project's `setup:` command from the new worktree, and opens the tree in your
+# editor.
 #
 # Usage:
 #   sapa worktree <branch-name> [start-point]
@@ -94,9 +95,38 @@ fi
 cd "$worktree_dir"
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRS 2>/dev/null || true
 
-# Run per-project setup if a .worktree-setup script exists at the project root.
-if [ -x "$project_root/.worktree-setup" ]; then
-  "$project_root/.worktree-setup"
+# Run the project's setup command from inside the new worktree, before the opener.
+# Set `setup:` in the project's `.sapa.yaml` to a shell command and it runs here,
+# read through the same typed accessor `sapa teardown` uses for `teardown:`.
+# Resolve sapa-config beside this script first so a branch-local worktree uses the
+# matching branch-local config discovery, then fall back to PATH. A non-zero exit
+# stops the worktree command with the tree left in place for diagnosis, so a
+# half-set-up worktree is never handed to the opener.
+setup_command=""
+sapa_config="$(dirname "$0")/sapa-config"
+if [ ! -x "$sapa_config" ]; then
+  sapa_config="$(command -v sapa-config || true)"
+fi
+if [ -n "$sapa_config" ]; then
+  config_path="$("$sapa_config" --start "$worktree_dir" 2>/dev/null || true)"
+  if [ -n "$config_path" ]; then
+    config_reader="$(dirname "$0")/sapa_config.py"
+    if setup_command="$(python3 "$config_reader" "$config_path" setup)"; then
+      :
+    else
+      exit $?
+    fi
+  fi
+fi
+
+if [ -n "$setup_command" ]; then
+  if (cd "$worktree_dir" && /bin/sh -c "$setup_command"); then
+    :
+  else
+    setup_rc=$?
+    echo "sapa worktree: project setup command failed (exit $setup_rc); left $worktree_dir in place." >&2
+    exit "$setup_rc"
+  fi
 fi
 
 # Open the new worktree, if the personal settings say to. Unset means print the

@@ -123,7 +123,7 @@ else
 fi
 
 # Task 2: every documented option appears as a commented entry.
-for key in base remote pr teardown tracker plan build writing_style watch gate; do
+for key in base remote pr setup teardown tracker plan build writing_style watch gate; do
   present=no
   grep -qE "^# ?${key}:" "$fresh/.sapa.yaml" && present=yes
   check "init documents $key" "yes" "$present"
@@ -206,6 +206,31 @@ else
 fi
 check "init prompt: no writes nothing" "no" \
   "$([ -f "$pdecline/.sapa.yaml" ] && echo yes || echo no)"
+
+# The typed config reader `sapa-worktree` and `sapa-teardown` call. It dispatches
+# by a command key, so both the setup and teardown accessors go through one CLI.
+READER="$HERE/../bin/sapa_config.py"
+reader_cfg="$root/reader.yaml"
+printf 'setup: flutter pub get\nteardown: mise dev:teardown\n' > "$reader_cfg"
+check "reader prints the setup command" "flutter pub get" \
+  "$(python3 "$READER" "$reader_cfg" setup)"
+check "reader prints the teardown command" "mise dev:teardown" \
+  "$(python3 "$READER" "$reader_cfg" teardown)"
+
+printf 'other: 1\n' > "$reader_cfg"
+check "reader prints nothing for an unset key" "" \
+  "$(python3 "$READER" "$reader_cfg" setup)"
+
+# A non-string value is a config error, not a silent empty read.
+printf 'setup:\n  - a\n  - b\n' > "$reader_cfg"
+python3 "$READER" "$reader_cfg" setup >/dev/null 2>&1
+check "reader exits non-zero on a non-string setup" "2" "$?"
+
+# A missing or unknown command key is a usage error that runs nothing.
+python3 "$READER" "$reader_cfg" >/dev/null 2>&1
+check "reader with no command key exits 2" "2" "$?"
+python3 "$READER" "$reader_cfg" bogus >/dev/null 2>&1
+check "reader with an unknown command key exits 2" "2" "$?"
 
 echo
 echo "$pass/$((pass + fail)) passed"

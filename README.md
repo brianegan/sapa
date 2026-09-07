@@ -65,8 +65,9 @@ The `sapa` command backs the skills so no logic is duplicated. One name on your
 `PATH`, a subcommand per helper (`sapa help` lists them):
 
 - `sapa bootstrap`: clone or `init` a repo into the `.bare` worktree layout.
-- `sapa worktree`: spin up a per-branch worktree off `origin/main` and open it
-  in your editor, if you have set one in your personal settings.
+- `sapa worktree`: spin up a per-branch worktree off `origin/main`, run the
+  project's optional `setup:` command in it, and open it in your editor, if you
+  have set one in your personal settings.
 - `sapa start`: turn an issue into a worktree ready to plan (derives the branch
   name from the issue title and calls `sapa worktree`). Takes a GitHub number
   (`42`) or a Jira key (`gp-1`); the key is kept in the branch name.
@@ -134,7 +135,7 @@ Plus `.sapa.yaml` (Sapa's own gate config; it gates itself) and `tests/`.
 
 Needs `git`, `gh` (authenticated), `python3`, and PyYAML. PyYAML ships with
 Apple's `/usr/bin/python3` and is `python3 -m pip install pyyaml` otherwise. Sapa
-uses it to read the `gate:` map and project `teardown:` commands. Jira projects
+uses it to read the `gate:` map and project `setup:` and `teardown:` commands. Jira projects
 also need `acli`.
 
 Clone the repo, then run the installer from it:
@@ -206,6 +207,10 @@ default:
 - `remote:`: the single remote to push to (default `origin`).
 - `pr:`: `draft` or `ready`, the state new PRs open in (default `draft`). Solo
   repos often prefer `ready`; shared repos keep `draft`.
+- `setup:`: a shell command `sapa worktree` runs from the new worktree, after it
+  is created and before the opener, for one-time setup such as installing
+  dependencies. A non-zero exit stops setup and leaves the worktree in place for
+  diagnosis.
 - `teardown:`: a shell command `sapa teardown` runs from the target worktree
   after checking for uncommitted changes and before clearing its status or
   removing anything. A non-zero exit stops teardown, leaving the worktree,
