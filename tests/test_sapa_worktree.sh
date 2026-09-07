@@ -115,6 +115,36 @@ for name in plain legacy configured flags quoted globby fromtemplate; do
   fi
 done
 
+# --- a project `setup:` command runs in the new worktree, before the opener ---
+# Ordering is observable through one shared log: setup appends its cwd, then the
+# opener (reached by exec) appends the path it was handed. Setup's line landing
+# first, and carrying the worktree path, is the sequence. This assertion can fail:
+# drop the setup call and its line is absent; run setup after the exec and the
+# opener has already replaced the process, so setup never logs at all.
+order_log="$root/setup-order"
+order_opener="$root/order-opener"
+printf '#!/bin/bash\nprintf "opener:%%s\\n" "$*" >> "%s"\n' "$order_log" > "$order_opener"
+chmod +x "$order_opener"
+: > "$order_log"
+printf 'opener: %s\n' "$order_opener" > "$HOME/.sapa/settings.yaml"
+printf 'setup: printf "setup:%%s\\n" "$(pwd)" >> "%s"\n' "$order_log" > "$proj/.sapa.yaml"
+( cd "$proj/main" && bash "$WORKTREE" setuprun >/dev/null 2>&1 )
+check "runs setup in the new worktree, before the opener" \
+  "$(printf 'setup:%s\nopener:%s' "$proj/setuprun" "$proj/setuprun")" \
+  "$(cat "$order_log")"
+
+# --- a failing `setup:` command aborts the worktree, opens nothing, keeps the tree ---
+# The worktree is created before setup runs, so a failure leaves it in place for
+# diagnosis; what must not happen is the opener running on a half-set-up tree.
+printf 'setup: exit 7\n' > "$proj/.sapa.yaml"
+: > "$order_log"
+( cd "$proj/main" && bash "$WORKTREE" setupfail >/dev/null 2>&1 ); rc=$?
+check "a failing setup command exits with its own status" "7" "$rc"
+check "a failing setup command opens nothing" "" "$(cat "$order_log")"
+check "a failing setup command leaves the worktree in place" "yes" \
+  "$([ -d "$proj/setupfail" ] && echo yes || echo no)"
+rm -f "$proj/.sapa.yaml" "$HOME/.sapa/settings.yaml" "$order_log" "$order_opener"
+
 # --- the default path branches from the configured `base`, not a hardcoded main ---
 # Give origin a second branch with a marker commit, so the test can tell which
 # ref the new worktree actually started from.

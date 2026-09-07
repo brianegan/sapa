@@ -94,6 +94,10 @@ write_template() {
 # One of `ready` or `draft`. Default: draft.
 # pr: draft
 
+# A shell command `sapa worktree` runs from the new worktree, before the opener.
+# A non-zero exit stops setup and leaves the worktree in place for diagnosis.
+# setup: flutter pub get
+
 # A shell command `sapa teardown` runs from the worktree before removing it.
 # A non-zero exit stops teardown so the worktree and branch remain available.
 # teardown: mise dev:teardown

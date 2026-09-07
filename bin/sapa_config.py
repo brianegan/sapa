@@ -43,23 +43,41 @@ def load_mapping(path: str) -> dict:
     return config
 
 
-def teardown_command(path: str) -> str | None:
-    """Return the optional project teardown command."""
+def _string_command(path: str, key: str) -> str | None:
+    """Return the optional string command stored under `key`, or None."""
     config = load_mapping(path)
-    if "teardown" not in config:
+    if key not in config:
         return None
-    value = config["teardown"]
+    value = config[key]
     if not isinstance(value, str):
-        raise ProjectConfigError(f"`teardown:` in {path} must be a string")
+        raise ProjectConfigError(f"`{key}:` in {path} must be a string")
     return value
 
 
+def setup_command(path: str) -> str | None:
+    """Return the optional project worktree setup command."""
+    return _string_command(path, "setup")
+
+
+def teardown_command(path: str) -> str | None:
+    """Return the optional project teardown command."""
+    return _string_command(path, "teardown")
+
+
+# The CLI commands, each a shell-callable accessor. Both read a string key through
+# the same loader, so `sapa-worktree` and `sapa-teardown` share one reader tool.
+COMMANDS = {
+    "setup": setup_command,
+    "teardown": teardown_command,
+}
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print(f"usage: {argv[0]} CONFIG", file=sys.stderr)
+    if len(argv) != 3 or argv[2] not in COMMANDS:
+        print(f"usage: {argv[0]} CONFIG {{{'|'.join(COMMANDS)}}}", file=sys.stderr)
         return 2
     try:
-        value = teardown_command(argv[1])
+        value = COMMANDS[argv[2]](argv[1])
     except ProjectConfigError as error:
         print(f"sapa config: {error}", file=sys.stderr)
         return 2

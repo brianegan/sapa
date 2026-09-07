@@ -133,6 +133,7 @@ me through my existing notification hook, which opens the right window on click.
 59. As a developer, I want the gate to write down what it actually ran, so that "the branch is green" is something I can check against a record rather than a claim that disappears with the session.
 60. As a reviewer, I want the PR to show which gate steps ran and whether any of them was given the plan to review against, so that I can see a thin gate for what it is without digging through someone else's config.
 61. As a developer, I want a project teardown command in `.sapa.yaml`, so that a repository can release its own resources before Sapa removes a finished worktree and preserve the stream when that cleanup fails.
+62. As a developer, I want a project setup command in `.sapa.yaml`, so that a new worktree can prepare itself (for example installing dependencies) before I start work, declared in config beside `teardown:` rather than as a separate executable at the repo root.
 
 ## Implementation Decisions
 
@@ -206,8 +207,9 @@ me through my existing notification hook, which opens the right window on click.
   Alongside the gate map, optional top-level keys tune the flow with
   backward-compatible defaults: `remote:` names the single remote (default
   `origin`), `pr:` selects the state new PRs open in (`draft` or `ready`, default
-  `draft`), `teardown:` is a project cleanup command that runs from the target
-  worktree before removal, `plan:` names a skill `/sapa-plan` delegates the planning
+  `draft`), `setup:` is a project command that runs from a new worktree after it is
+  created and before the opener, `teardown:` is a project cleanup command that runs
+  from the target worktree before removal, `plan:` names a skill `/sapa-plan` delegates the planning
   discussion to, `build:` names a skill `/sapa-build` invokes once before its
   first task to shape the implementation (for example `/tdd`),
   `writing_style:` names a skill sapa runs as a final pass over
@@ -377,6 +379,14 @@ me through my existing notification hook, which opens the right window on click.
 - **Trivial-merge policy.** A moved `main` is auto-rebased only when the merge is
   trivial, and the gate is always re-run afterward before the PR is considered
   green. The precise definition of "trivial" is an open decision.
+- **Worktree setup.** A project may set a top-level `setup:` shell command in
+  `.sapa.yaml`. `sapa worktree` runs it from the new worktree once the tree exists
+  and before the opener, read through the same typed config accessor as
+  `teardown:`. A non-zero exit stops the worktree command and leaves the tree in
+  place for diagnosis, so a half-set-up worktree is never handed to the opener.
+  This replaced an executable `.worktree-setup` script at the repo root: nothing
+  depended on the script, so it was dropped outright rather than kept as a
+  fallback, which puts per-project setup and teardown in one place and one loader.
 - **Merge teardown.** When the watcher sees the PR merged, that is the terminal
   state of the stream. It removes the worktree and deletes the local branch so
   there is no manual cleanup. Two guards: it only tears down a clean worktree,
